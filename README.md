@@ -6,6 +6,8 @@ A laptop dashboard and a native Android companion for a daily routine, academic 
 
 The laptop runs source updates and publishes a bounded SnapshotV1 payload to a private Convex deployment. The phone imports that snapshot only when **Sync now** is pressed. Phone actions such as task completion, water logs, notes, and attendance choices remain local and survive later imports. The phone does not run browser scrapers or an AI command line.
 
+The laptop keeps a private last-success receipt so its publish status survives a server restart. A staged snapshot alone is never shown as successfully published.
+
 Academic mail is included in a mobile snapshot only when its sender matches the laptop's `MOBILE_ACADEMIC_MAIL_SENDERS` allowlist. The default is empty. Local credentials, the staged snapshot, databases, and build artifacts are ignored by Git.
 
 ## Local development

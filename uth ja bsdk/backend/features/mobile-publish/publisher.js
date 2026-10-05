@@ -84,6 +84,7 @@ function configuredEndpoint(env) {
   if (
     url.protocol !== 'https:' ||
     !url.hostname.endsWith('.convex.site') ||
+    url.pathname !== '/mobile/snapshot' ||
     url.username ||
     url.password ||
     url.search ||

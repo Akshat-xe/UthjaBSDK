@@ -22,6 +22,7 @@ const PORT = process.env.PORT || 3000;
 const radarDataDir = path.join(__dirname, 'data', 'opportunity-radar');
 const mobileStageDir = path.join(__dirname, 'data', 'mobile-publish');
 const mobileStageFile = path.join(mobileStageDir, 'staged-snapshot.json');
+const mobilePublishReceiptFile = path.join(mobileStageDir, 'last-success.json');
 process.env.RADAR_DATA_DIR = radarDataDir;
 let quoteCache = null;
 let quoteCacheDate = '';
@@ -29,7 +30,32 @@ let radarModules;
 let radarScraper;
 let radarHarvestPromise = null;
 let lastGoodMobileMenu = null;
-let mobilePublishState = { status: 'idle', attemptedAt: null, revision: null, reason: null };
+function readMobilePublishReceipt() {
+  try {
+    if (fs.statSync(mobilePublishReceiptFile).size > 4096) return null;
+    const saved = JSON.parse(fs.readFileSync(mobilePublishReceiptFile, 'utf8'));
+    if (saved.status !== 'published' || typeof saved.revision !== 'string' ||
+        !saved.revision || saved.revision.length > 100 ||
+        typeof saved.attemptedAt !== 'string' ||
+        Number.isNaN(Date.parse(saved.attemptedAt))) return null;
+    return { status: 'published', attemptedAt: saved.attemptedAt,
+      revision: saved.revision, reason: null };
+  } catch {
+    return null;
+  }
+}
+function saveMobilePublishReceipt(state) {
+  try {
+    fs.mkdirSync(mobileStageDir, { recursive: true, mode: 0o700 });
+    const temporary = `${mobilePublishReceiptFile}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(state), { mode: 0o600 });
+    fs.renameSync(temporary, mobilePublishReceiptFile);
+  } catch {
+    console.error('[Mobile publish] Could not persist last success status.');
+  }
+}
+let mobilePublishState = readMobilePublishReceipt() ||
+  { status: 'idle', attemptedAt: null, revision: null, reason: null };
 const connectors = require('./features/sync/connectors');
 async function getRadarModules() {
   radarModules ||= Promise.all([
@@ -434,6 +460,7 @@ async function publishCurrentMobileSnapshot(syncState) {
       revision: result.revision || mobilePublishState.revision,
       reason: result.reason || null,
     };
+    if (result.status === 'published') saveMobilePublishReceipt(mobilePublishState);
     return result;
   } catch (error) {
     mobilePublishState = { ...mobilePublishState, status: 'failed', reason: 'collection_failed' };

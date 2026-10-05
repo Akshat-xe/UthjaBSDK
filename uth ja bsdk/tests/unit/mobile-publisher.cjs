@@ -81,7 +81,7 @@ const syncState = {
   });
 
   const config = {
-    CONVEX_MOBILE_PUBLISH_URL: 'https://example.convex.site/mobile-snapshot/publish',
+    CONVEX_MOBILE_PUBLISH_URL: 'https://example.convex.site/mobile/snapshot',
     CONVEX_MOBILE_PUBLISH_TOKEN: 'publisher-test-secret',
   };
   let request;
@@ -113,6 +113,7 @@ const syncState = {
     'https://evil.example/publish',
     'https://user:pass@example.convex.site/publish',
     'https://example.convex.site/publish?token=secret',
+    'https://example.convex.site/unrelated',
   ]) {
     assert.deepEqual(
       await publishMobileSnapshot(input, {
