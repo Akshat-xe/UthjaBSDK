@@ -1,0 +1,15 @@
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+backend/data/**
+!backend/data/.gitkeep
+backend/data/sync/**
+backend/private/**
+public/**/.*
+/public/build/

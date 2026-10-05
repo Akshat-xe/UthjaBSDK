@@ -1,0 +1,147 @@
+/* The weekly list combines live NST lessons with Section D classes from the routine. */
+.academic-integrated .academic-schedule-list article {
+  grid-template-columns: minmax(120px, 170px) minmax(0, 1fr);
+  gap: 20px;
+}
+.academic-integrated .academic-schedule-list li {
+  grid-template-columns: 126px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 11px 14px;
+}
+.academic-integrated .academic-schedule-list li > time {
+  color: #d4edb1;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.academic-integrated .academic-schedule-list li strong {
+  color: #edf4e7;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.academic-integrated .academic-schedule-list li small {
+  color: #b5c9b3;
+  font-size: 11px;
+}
+.academic-integrated .academic-schedule-list li[data-class-source='rufp'] {
+  border-color: rgba(177, 218, 175, 0.34);
+  background: rgba(32, 58, 39, 0.45);
+}
+.academic-class-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 9px;
+}
+.academic-source {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: rgba(180, 216, 165, 0.13);
+  color: #c8ddbd;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+}
+.academic-source.rufp {
+  background: #d9f3ad;
+  color: #17271b;
+}
+.academic-integrated .academic-schedule-list li.academic-no-class {
+  display: block;
+  color: #aebfac;
+}
+@media (max-width: 700px) {
+  .academic-integrated .academic-schedule-list article {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .academic-integrated .academic-schedule-list li {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 11px;
+  }
+}
+
+@media (max-width: 560px) {
+  #attendance-content .academic-stat:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Keep the academic overview within a desktop viewport when space allows. */
+@media (min-width: 901px) {
+  body[data-view^='academic-'] .topbar {
+    height: 72px;
+    min-height: 72px;
+  }
+  body[data-view^='academic-'] main {
+    padding-top: 19px;
+  }
+  body[data-view^='academic-'] .page-heading {
+    margin-bottom: 14px;
+  }
+  body[data-view^='academic-'] .page-heading h1 {
+    font-size: 32px;
+  }
+  body[data-view^='academic-'] .page-heading .eyebrow {
+    margin-bottom: 5px;
+  }
+  body[data-view^='academic-'] .page-heading p {
+    margin-top: 4px;
+  }
+  body[data-view^='academic-'] .academic-toolbar {
+    padding: 10px 14px;
+  }
+  #attendance-content > .panel-heading {
+    margin-bottom: 8px;
+  }
+  #attendance-content > .panel-heading h2 {
+    font-size: 18px;
+  }
+  #attendance-content .academic-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  #attendance-content .academic-stat {
+    padding: 10px 14px;
+    border-radius: 14px;
+  }
+  #attendance-content .academic-stat > strong {
+    margin: 3px 0 1px;
+    font-size: 27px;
+  }
+  #attendance-content .academic-meter {
+    height: 5px;
+    margin-top: 7px;
+  }
+  #attendance-content .course-breakdown-heading {
+    margin-top: 11px;
+  }
+  #attendance-content .academic-course-grid {
+    gap: 8px;
+    margin-top: 8px;
+  }
+  #attendance-content .academic-course {
+    padding: 10px 13px;
+    border-radius: 13px;
+  }
+  #attendance-content .academic-badge,
+  #attendance-content .academic-course-top > strong {
+    padding: 2px 7px;
+    font-size: 10px;
+  }
+  #attendance-content .academic-course h3 {
+    margin: 6px 0 2px;
+    font-size: 14px;
+  }
+  #attendance-content .academic-course small {
+    margin-top: 5px;
+    font-size: 10px;
+  }
+}

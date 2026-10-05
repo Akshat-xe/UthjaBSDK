@@ -1,0 +1,7 @@
+node_modules
+backend/data
+public/build
+artifacts
+*.pdf
+package-lock.json
+.archive

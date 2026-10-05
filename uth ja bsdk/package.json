@@ -1,0 +1,33 @@
+{
+  "name": "uthjabsdk-web",
+  "version": "1.0.0",
+  "description": "Full-stack web application and backend server for Uthjabsdk Habit & Timetable Tracker",
+  "main": "backend/server.js",
+  "scripts": {
+    "build:ui": "node scripts/generate-icons.cjs && tsc -p tsconfig.ui.json && node scripts/build-ui.cjs",
+    "prestart": "npm run build:ui",
+    "start": "node --env-file-if-exists=.env backend/server.js",
+    "dev": "npm run build:ui && node --env-file-if-exists=.env backend/server.js",
+    "test": "npm run build:ui && node tests/unit/schedule.cjs && node tests/unit/academic-dates.cjs && node tests/unit/backup.cjs && node tests/unit/radar-triage.cjs && node tests/unit/sync-integration.cjs && node tests/unit/mess-menu.cjs && node tests/unit/mobile-projection.cjs && node tests/unit/mobile-publisher.cjs && node tests/unit/mobile-publish-cases.cjs",
+    "test:browser": "npm run build:ui && node tests/browser/routine.cjs && node tests/browser/reminders.cjs && node tests/browser/radar.cjs && node tests/browser/academic.cjs && node tests/browser/update-control.cjs"
+  },
+  "dependencies": {
+    "convex": "^1.46.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  },
+  "keywords": [
+    "habit-tracker",
+    "timetable",
+    "alarm",
+    "productivity"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@iconify-json/ph": "^1.2.2",
+    "playwright": "1.63.0",
+    "prettier": "^3.9.9",
+    "typescript": "^7.0.2"
+  }
+}

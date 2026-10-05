@@ -1,0 +1,209 @@
+/* A routine step is one surface; its inner controls never paint a second card. */
+.routine-flow .task-row {
+  border-radius: 13px;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+.routine-flow .task-row:not(.current) {
+  background: transparent;
+}
+.routine-flow .task-row:not(.current):is(:hover, .expanded) {
+  background: rgba(166, 207, 152, 0.055);
+}
+.routine-flow .task-row.expanded {
+  outline: 1px solid rgba(177, 218, 175, 0.25);
+}
+.routine-flow .task-row.current,
+.routine-flow .task-row.current:hover {
+  background: linear-gradient(90deg, #294331, #1b3327) !important;
+  border-color: rgba(169, 217, 151, 0.38) !important;
+  box-shadow: inset 3px 0 #b4e59e;
+}
+.routine-flow .task-row:hover {
+  transform: none;
+}
+.routine-flow .task-main,
+.routine-flow .task-main:hover,
+.routine-flow .task-main:active,
+.routine-flow .task-time {
+  background: transparent !important;
+  filter: none !important;
+}
+.routine-flow .task-main {
+  min-height: 44px;
+  width: 100%;
+}
+.routine-flow .task-copy {
+  min-width: 0;
+}
+.routine-flow .task-expand-icon {
+  flex: none;
+  margin-left: auto;
+  color: #a8c79c;
+  transition: transform 160ms ease;
+}
+.routine-flow .task-row.expanded .task-expand-icon {
+  transform: rotate(180deg);
+}
+.routine-flow .task-glyph,
+.routine-flow .task-glyph.meal,
+.routine-flow .task-glyph.laundry,
+.routine-flow .task-glyph.class,
+.routine-flow .task-glyph.contest,
+.routine-flow .task-row.current .task-glyph {
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(188, 225, 171, 0.22);
+  border-radius: 11px;
+  background: rgba(181, 216, 169, 0.11);
+  color: #d4eabe;
+  box-shadow: none;
+}
+.routine-flow .task-glyph svg {
+  width: 22px;
+  height: 22px;
+}
+.routine-flow .task-row.current .task-glyph {
+  background: rgba(181, 216, 169, 0.17);
+  border-color: rgba(188, 225, 171, 0.37);
+}
+.routine-flow .task-row .task-main strong {
+  color: #edf4e7;
+  font-size: 14px;
+  font-weight: 600;
+}
+.routine-flow .task-row .task-main small {
+  color: #bdcfba;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.routine-flow .task-row.current .task-main small {
+  color: #c9e8b8 !important;
+}
+.routine-flow .class-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.routine-flow .class-room {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid rgba(188, 225, 171, 0.28);
+  border-radius: 6px;
+  background: rgba(188, 225, 171, 0.1);
+  color: #d7edcb;
+  font-weight: 700;
+}
+.routine-flow .class-reminder {
+  color: #bfd6b8;
+  font-weight: 550;
+}
+.routine-flow .task-main:focus-visible,
+.routine-flow .check-button:focus-visible {
+  outline: 2px solid #c9ed9f;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.routine-flow .task-inline-detail,
+.routine-new-detail {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid rgba(177, 218, 175, 0.25);
+  border-radius: 13px;
+  background: #14291d;
+  color: #eaf3e4;
+}
+.routine-flow .task-inline-detail {
+  grid-column: 2 / -1;
+  margin: 3px 0 12px;
+}
+.routine-new-detail {
+  margin: 6px 0 18px;
+}
+.inline-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.inline-detail-head strong {
+  color: #ecf7e3;
+}
+.inline-detail-head strong span {
+  color: #b9d9a8;
+  font-weight: 500;
+}
+.routine-flow .task-inline-detail > p {
+  display: block;
+  margin: 0 0 12px;
+  color: #dceadd;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.routine-flow .task-inline-detail .setting-note {
+  color: #b4c8b4;
+}
+.routine-flow .task-inline-detail h3,
+.routine-new-detail h3 {
+  margin: 0 0 12px;
+  color: #eaf3e4;
+  font-size: 18px;
+}
+.routine-flow .task-inline-detail .actions {
+  margin: 14px 0 0;
+}
+.routine-flow .task-inline-detail button,
+.routine-new-detail button {
+  min-height: 44px;
+}
+.routine-flow .task-inline-detail .secondary {
+  border: 1px solid rgba(177, 218, 175, 0.32);
+  background: #284331;
+  color: #eaf3e4;
+}
+.routine-flow .task-inline-detail .secondary:hover:not(:disabled) {
+  background: #33533b;
+  color: #fff;
+  filter: none;
+}
+.inline-edit-link {
+  margin-top: 12px;
+  color: #cdecad;
+}
+.routine-flow .task-inline-detail .checklist {
+  margin-top: 12px;
+}
+@media (max-width: 650px) {
+  .routine-flow .task-row .task-main strong {
+    font-size: 12.5px;
+  }
+  .routine-flow .task-row .task-main small {
+    font-size: 10.5px;
+  }
+  .routine-flow .class-meta {
+    gap: 3px 6px;
+  }
+  .routine-flow .class-room {
+    min-height: 20px;
+    padding: 1px 5px;
+  }
+  .routine-flow .task-inline-detail {
+    grid-column: 1 / -1;
+    padding: 14px;
+  }
+  .routine-flow .task-inline-detail .checklist {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .routine-flow .task-row,
+  .routine-flow .task-expand-icon {
+    transition: none;
+  }
+}

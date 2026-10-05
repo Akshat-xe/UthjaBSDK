@@ -1,0 +1,43 @@
+/* Food actions use readable text on the same forest surfaces as the rest of the app. */
+.food-tracking .tile-icon svg,
+.wide-grid .tile-icon svg {
+  width: 24px;
+  height: 24px;
+}
+.food-tracking .water-actions .secondary,
+.food-tracking #waterForm .secondary {
+  min-height: 46px;
+  border: 1px solid rgba(177, 218, 175, 0.34);
+  background: #23392a;
+  color: #edf7e7;
+  font-weight: 650;
+  filter: none;
+}
+.food-tracking #waterForm .secondary {
+  background: #d9f3ad;
+  border-color: #d9f3ad;
+  color: #142218;
+}
+@media (hover: hover) and (pointer: fine) {
+  .food-tracking .water-actions .secondary:hover:not(:disabled) {
+    background: #304b35;
+    border-color: #8ebc7b;
+    color: #fff;
+    filter: none;
+  }
+  .food-tracking #waterForm .secondary:hover:not(:disabled) {
+    background: #e5fac1;
+    color: #142218;
+    filter: none;
+  }
+}
+.food-tracking .secondary:disabled {
+  background: #26352b;
+  border-color: #445b48;
+  color: #a4b4a3;
+  opacity: 0.65;
+}
+.food-tracking input::placeholder {
+  color: #91a393;
+  opacity: 1;
+}

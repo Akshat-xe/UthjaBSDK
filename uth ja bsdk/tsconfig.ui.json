@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "paths": { "@/components/*": ["./src/ui/components/*"] },
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": "src/ui",
+    "outDir": "public/build",
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmitOnError": true
+  },
+  "include": ["src/ui/**/*.ts"]
+}

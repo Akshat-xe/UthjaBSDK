@@ -1,0 +1,242 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-42",
+  "runId": "sync-42",
+  "publishedAt": "2026-09-30T10:00:00.000Z",
+  "sources": {
+    "newton": {
+      "status": "success",
+      "freshness": "fresh",
+      "updatedAt": "2026-09-30T09:50:00.000Z"
+    },
+    "rishiverse": {
+      "status": "success",
+      "freshness": "fresh",
+      "updatedAt": "2026-09-30T09:50:00.000Z"
+    },
+    "gmail": {
+      "status": "success",
+      "freshness": "fresh",
+      "updatedAt": "2026-09-30T09:50:00.000Z"
+    },
+    "radar": {
+      "status": "success",
+      "freshness": "fresh",
+      "updatedAt": "2026-09-30T09:50:00.000Z"
+    },
+    "menu": {
+      "status": "success",
+      "freshness": "fresh",
+      "updatedAt": "2026-09-30T09:50:00.000Z"
+    }
+  },
+  "academic": {
+    "importedAt": "2026-09-30T09:50:00.000Z",
+    "semester": "Semester 3",
+    "attendance": {
+      "combined": {
+        "attended": 7,
+        "total": 10,
+        "percent": 70,
+        "canMiss": 1,
+        "needAttend": 2
+      },
+      "nst": {
+        "attended": 4,
+        "total": 5,
+        "percent": 80,
+        "canMiss": 1,
+        "needAttend": 0
+      },
+      "rufp": {
+        "attended": 3,
+        "total": 5,
+        "percent": 60,
+        "canMiss": 0,
+        "needAttend": 2
+      }
+    },
+    "subjects": [
+      {
+        "name": "Systems",
+        "group": "NST Core",
+        "code": "SYS",
+        "attended": 4,
+        "total": 5,
+        "absent": 1,
+        "percent": 80,
+        "canMiss": 0,
+        "needAttend": 0
+      }
+    ],
+    "schedule": [
+      {
+        "date": "2026-10-01",
+        "badge": "Thursday",
+        "items": [
+          {
+            "time": "09:00",
+            "subject": "Systems",
+            "type": "Lecture",
+            "title": "Networks",
+            "status": "Scheduled",
+            "location": "Room 2"
+          }
+        ]
+      }
+    ],
+    "emails": [
+      {
+        "sender": "Faculty",
+        "subject": "Schedule update",
+        "summary": "Class moves to Friday.",
+        "date": "2026-09-30",
+        "category": "Academic",
+        "priority": "",
+        "actionItem": ""
+      }
+    ]
+  },
+  "radar": {
+    "fetchedAt": "2026-09-30T09:50:00.000Z",
+    "opportunities": [
+      {
+        "id": "event-1",
+        "title": "Campus build day",
+        "organizer": "Campus",
+        "platform": "unstop",
+        "url": "https://example.test/events/1",
+        "mode": "online",
+        "location": "Remote",
+        "locationLabel": "Online · open anywhere",
+        "areaScope": "remote",
+        "distanceKm": null,
+        "prizePool": "INR 60,000",
+        "teamSize": "2–4 people",
+        "minTeam": 2,
+        "maxTeam": 4,
+        "registrationDeadline": "2026-10-10",
+        "startDate": "",
+        "endDate": "",
+        "summary": "Build a small prototype.",
+        "skills": [],
+        "details": {
+          "description": "Public project listing description.",
+          "eligibility": "Students",
+          "submissionDates": "October 1–10"
+        },
+        "analysis": {
+          "bucket": "easy",
+          "tier": "Tier A",
+          "tierKey": "A",
+          "difficulty": "easy",
+          "effortHours": "4–10",
+          "confidence": "medium"
+        }
+      }
+    ]
+  },
+  "menu": {
+    "fetchedAt": "2026-09-30T09:50:00.000Z",
+    "menu": {
+      "Monday": {
+        "breakfast": [
+          "Monday breakfast"
+        ],
+        "lunch": [
+          "Monday lunch"
+        ],
+        "snacks": [
+          "Monday snacks"
+        ],
+        "dinner": [
+          "Monday dinner"
+        ]
+      },
+      "Tuesday": {
+        "breakfast": [
+          "Tuesday breakfast"
+        ],
+        "lunch": [
+          "Tuesday lunch"
+        ],
+        "snacks": [
+          "Tuesday snacks"
+        ],
+        "dinner": [
+          "Tuesday dinner"
+        ]
+      },
+      "Wednesday": {
+        "breakfast": [
+          "Wednesday breakfast"
+        ],
+        "lunch": [
+          "Wednesday lunch"
+        ],
+        "snacks": [
+          "Wednesday snacks"
+        ],
+        "dinner": [
+          "Wednesday dinner"
+        ]
+      },
+      "Thursday": {
+        "breakfast": [
+          "Thursday breakfast"
+        ],
+        "lunch": [
+          "Thursday lunch"
+        ],
+        "snacks": [
+          "Thursday snacks"
+        ],
+        "dinner": [
+          "Thursday dinner"
+        ]
+      },
+      "Friday": {
+        "breakfast": [
+          "Friday breakfast"
+        ],
+        "lunch": [
+          "Friday lunch"
+        ],
+        "snacks": [
+          "Friday snacks"
+        ],
+        "dinner": [
+          "Friday dinner"
+        ]
+      },
+      "Saturday": {
+        "breakfast": [
+          "Saturday breakfast"
+        ],
+        "lunch": [
+          "Saturday lunch"
+        ],
+        "snacks": [
+          "Saturday snacks"
+        ],
+        "dinner": [
+          "Saturday dinner"
+        ]
+      },
+      "Sunday": {
+        "breakfast": [
+          "Sunday breakfast"
+        ],
+        "lunch": [
+          "Sunday lunch"
+        ],
+        "snacks": [
+          "Sunday snacks"
+        ],
+        "dinner": [
+          "Sunday dinner"
+        ]
+      }
+    }
+  }
+}

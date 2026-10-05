@@ -1,0 +1,15 @@
+{
+  "maxItems": 25,
+  "maxChargeUsdPerRun": 0.1,
+  "timeoutSeconds": 90,
+  "allowUsageBilledActor": false,
+  "linkedinJobUrls": [],
+  "actors": {
+    "solidcode": false,
+    "trusted_offshoot": false,
+    "parsebird": false,
+    "dami_studio": false,
+    "freshdata": false,
+    "bestscrapers": false
+  }
+}

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#101713" />
+    <meta
+      name="description"
+      content="Akshat’s offline-first routine, timetable, attendance, mail summaries and opportunity radar."
+    />
+    <title>Uth ja BSDK · Your daily rhythm</title>
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <script type="importmap">
+      { "imports": { "@/components/Icon": "/build/components/Icon.js" } }
+    </script>
+    <link rel="stylesheet" href="build/app.css?v=hover-1" />
+    <link rel="stylesheet" href="build/sidebar.css?v=sidebar-3" />
+    <link rel="stylesheet" href="build/routine.css?v=routine-1" />
+    <link rel="stylesheet" href="build/food.css?v=food-1" />
+    <link rel="stylesheet" href="build/academic.css?v=academic-2" />
+    <link rel="stylesheet" href="build/update-control.css?v=update-control-1" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <aside class="sidebar">
+      <a class="brand" href="#today"
+        ><span class="brand-icon">u<span>↗</span></span
+        ><span>Uth ja BSDK<small>YOUR DAILY RHYTHM</small></span></a
+      >
+      <nav id="navigation" aria-label="Main navigation"></nav>
+      <div class="sidebar-bottom">
+        <section class="daily-quote" aria-label="Daily thought">
+          <span class="eyebrow">A THOUGHT FOR TODAY</span>
+          <div id="dailyQuote">
+            <blockquote>“The secret of getting ahead is getting started.”</blockquote>
+            <small>— Mark Twain</small>
+          </div>
+        </section>
+        <div class="profile">
+          <span class="avatar avatar-initials" aria-hidden="true">AK</span><span
+            >Akshat Kumar<small
+              ><span>NST · Section D</span><span>RUFP · Section 4</span><span>Lab 1</span></small
+            ></span
+          >
+        </div>
+      </div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <strong id="breadcrumb" class="workspace-name">Akshat Kumar</strong>
+        <div class="top-actions">
+          <button
+            id="globalUpdateButton"
+            class="global-update-button"
+            type="button"
+            aria-controls="globalUpdateDialog"
+            title="Update attendance, mail, and events"
+          >
+            <span class="update-button-indicator" aria-hidden="true"></span
+            ><span>Update all</span></button
+          ><button id="alarmToggle" class="quiet-button" aria-pressed="false">
+            ♧ Enable reminders</button
+          ><time id="clock">--:-- AM</time>
+        </div>
+      </header>
+      <main id="main" tabindex="-1"><div id="page"></div></main>
+    </div>
+    <nav id="mobileNav" class="mobile-nav" aria-label="Mobile navigation"></nav>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <dialog
+      id="globalUpdateDialog"
+      class="global-update-dialog"
+      aria-labelledby="globalUpdateTitle"
+      aria-describedby="globalUpdateSummary"
+    >
+      <section class="global-update-content">
+        <div class="global-update-heading">
+          <span class="update-orbit" aria-hidden="true"><i></i></span>
+          <div>
+            <span class="eyebrow">CAMPUS DATA</span>
+            <h2 id="globalUpdateTitle">Update your campus data</h2>
+          </div>
+          <button
+            id="globalUpdateClose"
+            class="quiet-button"
+            type="button"
+            aria-label="Close update progress"
+          >
+            ×
+          </button>
+        </div>
+        <p id="globalUpdateSummary">One tap checks attendance, academic mail, and nearby events.</p>
+        <div
+          id="globalUpdateProgress"
+          class="global-update-progress"
+          role="progressbar"
+          aria-label="Update progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <i></i>
+        </div>
+        <ol id="globalUpdateSources" class="global-update-sources"></ol>
+        <footer><small id="globalUpdatedAt">No update has run on this device yet.</small></footer>
+      </section>
+    </dialog>
+    <dialog id="detailDialog" aria-labelledby="detailTitle"><div id="detailContent"></div></dialog>
+    <dialog id="alarmDialog" aria-labelledby="alarmTitle"><div id="alarmContent"></div></dialog>
+    <dialog id="radarDialog" aria-labelledby="radarDialogTitle">
+      <div id="radarDialogContent"></div>
+    </dialog>
+    <script type="module" src="build/app.js?v=academic-layout-1"></script>
+  </body>
+</html>

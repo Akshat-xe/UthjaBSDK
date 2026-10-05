@@ -1,0 +1,9 @@
+# Private mobile snapshot service
+
+The laptop sends a finished, allowlisted `SnapshotV1` to `POST /mobile/snapshot` on this deployment's `.convex.site` URL. Only this endpoint accepts `MOBILE_PUBLISH_TOKEN`. The Android app reads `GET /mobile/snapshot` with a different `MOBILE_READ_TOKEN` on explicit user tap. Both are 256-bit or stronger random values stored in the Convex deployment environment. Neither token belongs in source control, logs, or an APK. The read token must be provisioned to the phone through a secure pairing step and stored with Android Keystore protection.
+
+Publishing inserts a snapshot, advances the `mobileHeads` pointer, and removes superseded snapshots in one mutation. A repeated current revision with the same content is idempotent; an older revision or conflicting content is rejected. The read endpoint returns only the current revision, plus its SHA-256 digest in a response header. The phone verifies the digest and schema before replacing its local copy. Requests use HTTPS and `Cache-Control: no-store`; there is no realtime subscription or automatic phone refresh.
+
+Required deployment environment names: `MOBILE_PUBLISH_TOKEN`, `MOBILE_READ_TOKEN`. Generate distinct random tokens locally and set them through the Convex CLI; keep pairing values in ignored local files. Do not put literal values or a personal deployment URL in this repository. The site's `backend/features/mobile-publish/projection.js` prepares the snapshot before this service is called. Regenerate types and deploy changes with `npx convex dev --once --typecheck enable` from the website directory.
+
+The current 700 KB request cap is below Convex's 1 MB document-value limit. If realistic snapshots exceed it, split them into bounded parts with an atomic head rather than increasing the cap blindly. Superseded snapshots are removed when a newer revision becomes current.
