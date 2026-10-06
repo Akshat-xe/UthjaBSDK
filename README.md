@@ -8,7 +8,7 @@ The laptop runs source updates and publishes a bounded SnapshotV1 payload to a p
 
 The laptop keeps a private last-success receipt so its publish status survives a server restart. A staged snapshot alone is never shown as successfully published.
 
-Academic mail is included in a mobile snapshot only when its sender matches the laptop's `MOBILE_ACADEMIC_MAIL_SENDERS` allowlist. The default is empty. Local credentials, the staged snapshot, databases, and build artifacts are ignored by Git.
+Academic mail is included in a mobile snapshot only when local AI marks it urgent or high priority and its sender matches the default campus domains (`@rishihood.edu.in` and `@nst.rishihood.edu.in`) or a replacement `MOBILE_ACADEMIC_MAIL_SENDERS` allowlist configured on the laptop. Local credentials, the staged snapshot, databases, and build artifacts are ignored by Git.
 
 ## Local development
 
