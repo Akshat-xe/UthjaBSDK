@@ -57,6 +57,8 @@ function saveMobilePublishReceipt(state) {
 let mobilePublishState = readMobilePublishReceipt() ||
   { status: 'idle', attemptedAt: null, revision: null, reason: null };
 const connectors = require('./features/sync/connectors');
+const { SyncScheduler } = require('./features/sync/scheduler');
+const { SyncRequestWorker } = require('./features/sync/syncRequestWorker');
 async function getRadarModules() {
   radarModules ||= Promise.all([
     import('./opportunity-radar/src/db/database.js'),
@@ -332,7 +334,18 @@ app.post('/api/radar/scrape', requireLocalOrigin, (req, res) => {
   );
 });
 app.get('/api/sync/status', (_req, res) =>
-  res.set('Cache-Control', 'no-store').json({ success: true, ...connectors.getSyncState() }),
+  res.set('Cache-Control', 'no-store').json({
+    success: true,
+    ...connectors.getSyncState(),
+    schedule: scheduler.getStatus(),
+    phoneQueue: syncRequestWorker?.getStatus?.() || null,
+  }),
+);
+app.get('/api/sync/schedule', (_req, res) =>
+  res.set('Cache-Control', 'no-store').json({
+    success: true,
+    ...scheduler.getStatus(),
+  }),
 );
 async function publishCurrentMobileSnapshot(syncState) {
   mobilePublishState = {
@@ -374,6 +387,7 @@ async function publishCurrentMobileSnapshot(syncState) {
             emails: filterApprovedAcademicMail(
               academic.emails,
               process.env.MOBILE_ACADEMIC_MAIL_SENDERS,
+              { requireUrgent: true },
             ),
           };
         },
@@ -472,33 +486,60 @@ app.get('/api/mobile-publish/status', (_req, res) =>
   res.set('Cache-Control', 'no-store').json(mobilePublishState),
 );
 
-app.post('/api/sync', requireLocalOrigin, (_req, res) => {
-  if (connectors.getSyncState().running)
-    return res.status(409).json({ success: false, error: 'Sync all is already running' });
+async function executeSyncPipeline({ trigger = 'manual' } = {}) {
   mobilePublishState = { ...mobilePublishState, status: 'waiting_for_sync', reason: null };
-  res.status(202).json({ success: true, message: 'Sync all started' });
-  connectors
-    .syncAll({
+  let syncState;
+  try {
+    syncState = await connectors.syncAll({
       radar: () => connectors.syncRadar({ harvest: () => startRadarHarvest('sync_all') }),
-    })
-    .then(async (syncState) => {
-      try {
-        const result = await publishCurrentMobileSnapshot(syncState);
-        if (result.status === 'failed')
-          console.error(`[Mobile publish] Automatic publish failed (${result.reason}).`);
-      } catch {
-        console.error('[Mobile publish] Automatic publish failed; details hidden.');
-      }
-    })
-    .catch(() => {
-      mobilePublishState = { ...mobilePublishState, status: 'failed', reason: 'sync_failed' };
-      console.error('[Sync all] Sync failed; private diagnostics hidden.');
     });
+  } catch (error) {
+    mobilePublishState = { ...mobilePublishState, status: 'failed', reason: 'sync_failed' };
+    console.error('[Sync all] Sync failed; private diagnostics hidden.');
+    throw error;
+  }
+
+  let publishResult = null;
+  try {
+    publishResult = await publishCurrentMobileSnapshot(syncState);
+    if (publishResult.status === 'failed')
+      console.error(`[Mobile publish] Automatic publish failed (${publishResult.reason}).`);
+  } catch {
+    console.error('[Mobile publish] Automatic publish failed; details hidden.');
+  }
+
+  return { syncState, publishResult };
+}
+
+const scheduler = new SyncScheduler({
+  executeSync: executeSyncPipeline,
+  isSyncRunning: () => connectors.getSyncState().running,
+});
+scheduler.initFromPersisted(connectors.getSyncState(), mobilePublishState);
+scheduler.start();
+
+const syncRequestWorker = new SyncRequestWorker({
+  scheduler,
+  env: process.env,
+});
+syncRequestWorker.start();
+
+app.post('/api/sync', requireLocalOrigin, (_req, res) => {
+  const triggerResult = scheduler.triggerManual();
+  if (!triggerResult.started)
+    return res.status(409).json({ success: false, error: 'Sync all is already running' });
+  if (triggerResult.promise) {
+    triggerResult.promise.catch((_error) => {
+      // The background sync pipeline already logs failure and updates scheduler/publish status;
+      // swallow here to prevent an unhandled promise rejection without leaking internal diagnostics.
+    });
+  }
+  res.status(202).json({ success: true, message: 'Sync all started' });
 });
 
 app.post('/api/mobile-publish', requireLocalOrigin, async (_req, res) => {
   const syncState = connectors.getSyncState();
-  if (syncState.running)
+  if (syncState.running || scheduler.isBusy())
     return res.status(409).json({ success: false, error: 'Sync all is still running' });
   if (mobilePublishState.status === 'publishing')
     return res.status(409).json({ success: false, error: 'Mobile publication is already running' });
@@ -535,8 +576,8 @@ function getAcademicSnapshot() {
     }
   };
   const data = readLocal('data.json');
-  const mailData = readLocal('emails.json');
   const savedAcademicSources = connectors.getAcademicSources();
+  const gmailSource = savedAcademicSources.gmail;
   const sourceTimestamps = Object.fromEntries(
     Object.entries(savedAcademicSources).map(([name, source]) => [
       name,
@@ -544,8 +585,8 @@ function getAcademicSnapshot() {
     ]),
   );
   const mailUpdatedAt =
-    typeof mailData?.updatedAt === 'string' && Number.isFinite(Date.parse(mailData.updatedAt))
-      ? new Date(mailData.updatedAt).toISOString()
+    typeof gmailSource?.updatedAt === 'string' && Number.isFinite(Date.parse(gmailSource.updatedAt))
+      ? new Date(gmailSource.updatedAt).toISOString()
       : null;
   if (!data)
     return {
@@ -561,7 +602,7 @@ function getAcademicSnapshot() {
       deadlines: [],
       emails: [],
     };
-  const rawImportedAt = data.updated_at || mailData?.updatedAt || null;
+  const rawImportedAt = data.updated_at || null;
   const importedMatch =
     typeof rawImportedAt === 'string' &&
     rawImportedAt.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2}):(\d{2})\s*(am|pm)$/i);
@@ -649,10 +690,14 @@ function getAcademicSnapshot() {
     .filter(Boolean)
     .sort()
     .at(-1);
-  const mailItems = (mailData?.items || data.emails?.items || []).slice(0, 12).map((item) => ({
+  const rawMailItems = Array.isArray(gmailSource?.items) ? gmailSource.items : [];
+  const mailItems = rawMailItems.slice(0, 12).map((item) => ({
     sender: String(item.sender || 'Academic notice').slice(0, 100),
     subject: String(item.subject || item.aiTitle || 'No subject').slice(0, 180),
     snippet: String(item.summary || item.snippet || '')
+      .replace(/\\s+/g, ' ')
+      .slice(0, 220),
+    summary: String(item.summary || item.snippet || '')
       .replace(/\\s+/g, ' ')
       .slice(0, 220),
     date: String(item.dateOnly || item.date || '').slice(0, 48),
@@ -934,6 +979,16 @@ app.get('*', (req, res) => {
 });
 
 // Start listening
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`🚀 Uthjabsdk Web & API Server running at http://localhost:${PORT}`);
-});
+let server = null;
+if (require.main === module) {
+  server = app.listen(PORT, '127.0.0.1', () => {
+    console.log(`🚀 Uthjabsdk Web & API Server running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = {
+  app,
+  server,
+  scheduler,
+  executeSyncPipeline,
+};

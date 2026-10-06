@@ -8,7 +8,7 @@
     "prestart": "npm run build:ui",
     "start": "node --env-file-if-exists=.env backend/server.js",
     "dev": "npm run build:ui && node --env-file-if-exists=.env backend/server.js",
-    "test": "npm run build:ui && node tests/unit/schedule.cjs && node tests/unit/academic-dates.cjs && node tests/unit/backup.cjs && node tests/unit/radar-triage.cjs && node tests/unit/sync-integration.cjs && node tests/unit/mess-menu.cjs && node tests/unit/mobile-projection.cjs && node tests/unit/mobile-publisher.cjs && node tests/unit/mobile-publish-cases.cjs",
+    "test": "npm run build:ui && node tests/unit/schedule.cjs && node tests/unit/academic-dates.cjs && node tests/unit/backup.cjs && node tests/unit/radar-triage.cjs && node tests/unit/sync-integration.cjs && node tests/unit/sync-scheduler.cjs && node tests/unit/sync-request-worker.cjs && node tests/unit/browser-attendance-connector.cjs && node tests/unit/browser-sources.cjs && node tests/unit/academic-mail.cjs && node tests/unit/mess-menu.cjs && node tests/unit/mobile-projection.cjs && node tests/unit/mobile-publisher.cjs && node tests/unit/mobile-publish-cases.cjs",
     "test:browser": "npm run build:ui && node tests/browser/routine.cjs && node tests/browser/reminders.cjs && node tests/browser/radar.cjs && node tests/browser/academic.cjs && node tests/browser/update-control.cjs"
   },
   "dependencies": {

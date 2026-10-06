@@ -1,26 +1,51 @@
 'use strict';
 
-function filterApprovedAcademicMail(items, configuredSenders) {
+const DEFAULT_ALLOWED_DOMAINS = ['@rishihood.edu.in', '@nst.rishihood.edu.in'];
+
+function isUrgentPriority(priority) {
+  const p = String(priority || '').trim().toLowerCase();
+  return p === 'urgent' || p === 'high';
+}
+
+function filterApprovedAcademicMail(items, configuredSenders, { requireUrgent = false } = {}) {
+  const configuredList = String(configuredSenders || '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => /^([a-z0-9._%+-]+)?@[a-z0-9.-]+\.[a-z]{2,}$/.test(entry));
+
   const allowed = new Set(
-    String(configuredSenders || '')
-      .split(',')
-      .map((entry) => entry.trim().toLowerCase())
-      .filter((entry) => /^([a-z0-9._%+-]+)?@[a-z0-9.-]+\.[a-z]{2,}$/.test(entry)),
+    configuredList.length > 0 ? configuredList : DEFAULT_ALLOWED_DOMAINS,
   );
-  if (!allowed.size || !Array.isArray(items)) return [];
+
+  if (!Array.isArray(items)) return [];
   return items.filter((item) => {
+    // 1. Sender validation
     const address = String(item?.sender || '')
       .match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i)?.[0]
       ?.toLowerCase();
     if (!address) return false;
     const domain = address.slice(address.indexOf('@'));
-    return allowed.has(address) || allowed.has(domain);
+    if (!allowed.has(address) && !allowed.has(domain)) return false;
+
+    // 2. Priority validation: reject nonurgent items
+    if (item?.priority !== undefined && item?.priority !== null && item?.priority !== '') {
+      if (!isUrgentPriority(item.priority)) return false;
+    } else if (requireUrgent) {
+      return false;
+    }
+
+    return true;
   });
 }
 
 function sanitizeStagedAcademicMail(snapshot, configuredSenders, nextRevision) {
-  const emails = filterApprovedAcademicMail(snapshot.academic.emails, configuredSenders);
-  if (emails.length === snapshot.academic.emails.length) return snapshot;
+  const currentEmails = snapshot?.academic?.emails;
+  const emails = filterApprovedAcademicMail(currentEmails, configuredSenders, {
+    requireUrgent: true,
+  });
+  if (Array.isArray(currentEmails) && emails.length === currentEmails.length) {
+    return snapshot;
+  }
   return {
     ...snapshot,
     revision: nextRevision,
@@ -29,4 +54,9 @@ function sanitizeStagedAcademicMail(snapshot, configuredSenders, nextRevision) {
   };
 }
 
-module.exports = { filterApprovedAcademicMail, sanitizeStagedAcademicMail };
+module.exports = {
+  filterApprovedAcademicMail,
+  sanitizeStagedAcademicMail,
+  DEFAULT_ALLOWED_DOMAINS,
+  isUrgentPriority,
+};

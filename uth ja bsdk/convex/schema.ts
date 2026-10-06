@@ -13,4 +13,19 @@ export default defineSchema({
     key: v.string(),
     revision: v.string(),
   }).index('by_key', ['key']),
+  mobileSyncRequests: defineTable({
+    state: v.union(
+      v.literal('pending'),
+      v.literal('running'),
+      v.literal('completed'),
+      v.literal('failed'),
+      v.literal('expired'),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    expiresAt: v.number(),
+    claimedAt: v.optional(v.number()),
+  })
+    .index('by_created_at', ['createdAt'])
+    .index('by_state_created_at', ['state', 'createdAt']),
 });

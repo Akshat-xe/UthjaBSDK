@@ -28,6 +28,29 @@ The top-bar **Update all** starts one local sync for Newton attendance, RUFP att
 
 RU Print menu access is documented in [RU Print Menu API](docs/RU-PRINT-MENU-API.md). Architecture and migration phases are in [Feature guides and roadmap](docs/features/README.md).
 
+## Attendance setup (Browser adapter)
+
+To connect attendance via the isolated Chrome browser profile:
+
+```sh
+node scripts/connect-attendance.cjs newton
+node scripts/connect-attendance.cjs rishiverse
+```
+
+Profiles are kept in `backend/data/browser-sources/` with `0700` permissions. Google sign-in selects the single saved `@rishihood.edu.in` or `@nst.rishihood.edu.in` account and prompts for manual interaction if password/MFA is required.
+
+## Auto-start at login (LaunchAgent)
+
+To run the local server automatically whenever the Mac is logged in and awake:
+
+```sh
+./scripts/setup-launchagent.sh install    # installs ~/Library/LaunchAgents/com.uthjabsdk.server.plist
+./scripts/setup-launchagent.sh status     # checks service status
+./scripts/setup-launchagent.sh uninstall  # cleanly removes agent without affecting other services
+```
+
+When the Mac is asleep or powered off, the server does not execute; the Android app shows the latest saved snapshot with an offline/stale notice.
+
 ## Checks
 
 ```sh

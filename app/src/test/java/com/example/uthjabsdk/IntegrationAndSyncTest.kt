@@ -11,6 +11,7 @@ import com.example.uthjabsdk.core.sync.PhoneActionStorage
 import com.example.uthjabsdk.core.sync.SnapshotCache
 import com.example.uthjabsdk.core.sync.SnapshotFetchResult
 import com.example.uthjabsdk.core.sync.SnapshotValidator
+import com.example.uthjabsdk.core.sync.SyncRequestResult
 import com.example.uthjabsdk.core.sync.ValidationResult
 import com.example.uthjabsdk.core.ui.RealUthJaBsdkDataSource
 import kotlinx.coroutines.CoroutineScope
@@ -395,6 +396,8 @@ class IntegrationAndSyncTest {
 
         assertEquals(SyncOverallState.SUCCESS, dataSource.syncState.value.overallState)
         assertFalse(dataSource.syncState.value.isRunning)
+        assertEquals(1, mockHttpClient.syncRequestInvocationLog.size)
+        assertEquals(1, mockHttpClient.syncStatusInvocationLog.size)
         assertEquals("rev-101", dataSource.syncState.value.revision)
         assertNotNull(dataSource.syncState.value.lastSyncTime)
         assertEquals(SyncSourceStateStatus.SUCCESS, dataSource.syncState.value.sources["newton"]?.status)
@@ -408,6 +411,26 @@ class IntegrationAndSyncTest {
             CoroutineScope(Dispatchers.Unconfined)
         )
         assertEquals(1, reopened.eventLogs.value.count { it.type == "snapshot_imported" })
+    }
+
+    @Test
+    fun testManualSync_requestsLaptopAndStillImportsWhenQueueIsUnavailable() = runBlocking {
+        mockHttpClient.setSyncRequestResult(SyncRequestResult.HttpError(503, "Laptop offline"))
+        val dataSource = RealUthJaBsdkDataSource(
+            credentialStorage = credentialStorage,
+            snapshotCache = snapshotCache,
+            phoneActionStorage = phoneActionStorage,
+            httpClient = mockHttpClient,
+            coroutineScope = CoroutineScope(Dispatchers.Unconfined)
+        )
+
+        dataSource.triggerSync()
+
+        assertEquals(1, mockHttpClient.syncRequestInvocationLog.size)
+        assertEquals(1, mockHttpClient.invocationLog.size)
+        assertEquals("rev-101", dataSource.syncState.value.revision)
+        assertTrue(dataSource.syncState.value.errorMessage?.contains("showing latest saved data") == true)
+        assertFalse(dataSource.syncState.value.isRunning)
     }
 
     @Test

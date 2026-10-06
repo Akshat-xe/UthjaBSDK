@@ -10,6 +10,7 @@
 
 import type * as http from "../http.js";
 import type * as mobileSnapshots from "../mobileSnapshots.js";
+import type * as mobileSyncRequests from "../mobileSyncRequests.js";
 
 import type {
   ApiFromModules,
@@ -20,6 +21,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   http: typeof http;
   mobileSnapshots: typeof mobileSnapshots;
+  mobileSyncRequests: typeof mobileSyncRequests;
 }>;
 
 /**

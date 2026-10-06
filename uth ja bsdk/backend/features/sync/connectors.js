@@ -3,6 +3,7 @@ const { promisify } = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const { attendanceTask } = require('./browserAttendanceConnector');
 
 const execFileAsync = promisify(execFile);
 const MAX_ITEMS = 8;
@@ -12,7 +13,7 @@ const MAX_COPILOT_STREAM = 262144;
 const DATA_DIR =
   process.env.UTHJA_SYNC_DATA_DIR || path.join(__dirname, '..', '..', 'data', 'sync');
 const state = { running: false, startedAt: null, finishedAt: null, sources: {} };
-const academicSources = { newton: null, rishiverse: null };
+const academicSources = { newton: null, rishiverse: null, gmail: null };
 const bounded = (value, max) =>
   String(value || '')
     .replace(/\s+/g, ' ')
@@ -231,10 +232,97 @@ async function syncRishiverse() {
 }
 
 function mailScript() {
-  return 'tell application "Mail"\nset rows to {}\nset fieldSeparator to ASCII character 31\nset rowSeparator to ASCII character 30\nset inboxMessages to messages of inbox\nset messageCount to count of inboxMessages\nif messageCount > 8 then set messageCount to 8\nrepeat with messageIndex from 1 to messageCount\nset messageItem to item messageIndex of inboxMessages\nset end of rows to ((sender of messageItem as text) & fieldSeparator & (subject of messageItem as text) & fieldSeparator & (content of messageItem as text) & fieldSeparator & (date received of messageItem as text))\nend repeat\nset AppleScript\'s text item delimiters to rowSeparator\nreturn rows as text\nend tell';
+  return [
+    'tell application "Mail"',
+    'set matchedAccounts to {}',
+    'repeat with acc in accounts',
+    'set isMatched to false',
+    'try',
+    'set addrs to email addresses of acc',
+    'repeat with addr in addrs',
+    'set lowerAddr to addr as text',
+    'if lowerAddr ends with "@rishihood.edu.in" or lowerAddr ends with "@nst.rishihood.edu.in" then',
+    'set isMatched to true',
+    'exit repeat',
+    'end if',
+    'end repeat',
+    'end try',
+    'if not isMatched then',
+    'try',
+    'set uname to user name of acc as text',
+    'if uname ends with "@rishihood.edu.in" or uname ends with "@nst.rishihood.edu.in" then',
+    'set isMatched to true',
+    'end if',
+    'end try',
+    'end if',
+    'if isMatched then',
+    'set end of matchedAccounts to acc',
+    'end if',
+    'end repeat',
+    'if (count of matchedAccounts) = 0 then',
+    'return "STATUS:NO_RISHIHOOD_ACCOUNT"',
+    'end if',
+    'set rows to {}',
+    'set fieldSeparator to ASCII character 31',
+    'set rowSeparator to ASCII character 30',
+    'set maxTotal to 8',
+    'set collectedCount to 0',
+    'repeat with targetAccount in matchedAccounts',
+    'if collectedCount >= maxTotal then exit repeat',
+    'set targetMbox to missing value',
+    'try',
+    'set targetMbox to mailbox "INBOX" of targetAccount',
+    'on error',
+    'try',
+    'set targetMbox to (first mailbox of targetAccount whose name is "INBOX" or name is "Inbox")',
+    'on error',
+    'if (count of mailboxes of targetAccount) > 0 then',
+    'set targetMbox to item 1 of (mailboxes of targetAccount)',
+    'end if',
+    'end try',
+    'end try',
+    'if targetMbox is not missing value then',
+    'set inboxMessages to messages of targetMbox',
+    'set messageCount to count of inboxMessages',
+    'set fetchLimit to maxTotal - collectedCount',
+    'if messageCount > fetchLimit then set messageCount to fetchLimit',
+    'repeat with messageIndex from 1 to messageCount',
+    'set messageItem to item messageIndex of inboxMessages',
+    'set msgBody to ""',
+    'try',
+    'set msgBody to content of messageItem as text',
+    'if length of msgBody > 500 then',
+    'set msgBody to text 1 thru 500 of msgBody',
+    'end if',
+    'end try',
+    'set senderText to ""',
+    'try',
+    'set senderText to sender of messageItem as text',
+    'end try',
+    'set subjectText to ""',
+    'try',
+    'set subjectText to subject of messageItem as text',
+    'end try',
+    'set dateText to ""',
+    'try',
+    'set dateText to date received of messageItem as text',
+    'end try',
+    'set end of rows to (senderText & fieldSeparator & subjectText & fieldSeparator & msgBody & fieldSeparator & dateText)',
+    'set collectedCount to collectedCount + 1',
+    'end repeat',
+    'end if',
+    'end repeat',
+    'if collectedCount = 0 then',
+    'return "STATUS:EMPTY"',
+    'end if',
+    'set AppleScript\'s text item delimiters to rowSeparator',
+    'return rows as text',
+    'end tell',
+  ].join('\n');
 }
 async function extractMail() {
-  if (process.platform !== 'darwin') throw new Error('Apple Mail is available only on macOS');
+  if (process.platform !== 'darwin')
+    throw configurationError('Apple Mail is available only on macOS.');
   let stdout;
   try {
     ({ stdout } = await execFileAsync('osascript', ['-e', mailScript()], {
@@ -244,8 +332,19 @@ async function extractMail() {
   } catch (error) {
     throw mailError(error);
   }
-  const items = normalizeMail(stdout.split('\x1e').filter(Boolean));
-  if (!items.length) throw new Error('Apple Mail inbox was unavailable or empty');
+  const trimmed = stdout.trim();
+  if (trimmed === 'STATUS:NO_RISHIHOOD_ACCOUNT') {
+    throw configurationError(
+      'Rishihood Mail setup needed: configure an @rishihood.edu.in account in Apple Mail.',
+    );
+  }
+  if (trimmed === 'STATUS:NO_INBOX') {
+    throw new Error('Apple Mail could not access the Rishihood inbox. Check Mail and try again.');
+  }
+  if (trimmed === 'STATUS:EMPTY' || !trimmed) {
+    return [];
+  }
+  const items = normalizeMail(trimmed.split('\x1e').filter(Boolean));
   return items;
 }
 function normalizeMail(lines) {
@@ -257,7 +356,7 @@ function normalizeMail(lines) {
         sender: bounded(sender, 100),
         subject: bounded(subject, 180),
         snippet: bounded(snippet, MAX_SNIPPET),
-        date: bounded(date, 40),
+        date: bounded(date, 48),
       };
     })
     .filter((item) => item.subject || item.snippet);
@@ -452,13 +551,140 @@ async function syncRadar({ harvest, analyze = copilotJson, getCandidates }) {
     brief: `Reviewed ${reviewed} event${reviewed === 1 ? '' : 's'}.`,
   };
 }
-async function syncGmail() {
-  const items = await extractMail();
-  try {
-    return { items, summary: await summarizeMail(items) };
-  } catch (error) {
-    return { status: 'partial', items, error: bounded(error.message, 220) };
+function academicMailPrompt(candidates) {
+  return `Classify each academic email message for urgency, importance, and required action.
+Return ONLY a valid JSON array with exactly ${candidates.length} objects, one per message in the same order.
+Each object must have these exact fields:
+- "id": integer matching the input message id
+- "priority": exactly one of "urgent", "high", "normal", "low". Mark as "urgent" or "high" ONLY for critical academic deadlines (exams, submissions, fee payments, class cancellations, room changes, emergency notices) requiring immediate student attention or action within 24-48 hours. Mark general newsletters, event invitations, routine announcements, promotional mail, and club activities as "normal" or "low". Be conservative; when in doubt, do not mark as urgent.
+- "category": a short category string (e.g. "Exam", "Attendance", "Deadline", "Administrative", "Class", "General", max 48 characters)
+- "summary": a concise, factual plain-text summary of the message (max 220 characters). Do not invent facts.
+- "actionItem": a clear, actionable task for the student if required (max 180 characters), or "" if no action is needed.
+
+Do not use markdown fences or prose outside the JSON array.
+INPUT:
+${JSON.stringify(candidates)}`;
+}
+
+function normalizeMailClassification(output, candidates) {
+  const rows = Array.isArray(output)
+    ? output
+    : output && ['classifications', 'emails', 'messages', 'items', 'results']
+        .map((key) => output[key])
+        .find(Array.isArray);
+  if (!Array.isArray(rows) || rows.length !== candidates.length)
+    throw new Error('Copilot response did not match the expected mail classification format.');
+
+  const validPriorities = new Set(['urgent', 'high', 'normal', 'low']);
+  const candidateList = candidates.map((c, idx) => ({
+    id: c.id !== undefined && c.id !== null ? Number(c.id) : idx,
+    candidate: c,
+  }));
+  const candidateIds = new Set(candidateList.map((c) => c.id));
+  const seenIds = new Set();
+  const rowById = new Map();
+
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') {
+      throw new Error('Copilot response did not match the expected mail classification format.');
+    }
+    const rawId = row.id ?? row.messageId ?? row.message_id;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || !candidateIds.has(id) || seenIds.has(id)) {
+      throw new Error('Copilot response did not match the expected mail classification format.');
+    }
+    seenIds.add(id);
+    rowById.set(id, row);
   }
+
+  return candidateList.map(({ id, candidate }) => {
+    const row = rowById.get(id);
+    if (!row) {
+      throw new Error('Copilot response did not match the expected mail classification format.');
+    }
+    const rawPriority = String(row?.priority || '').trim().toLowerCase();
+    const priority = validPriorities.has(rawPriority) ? rawPriority : 'normal';
+    const category = bounded(row?.category || 'Academic', 48);
+    const summary = bounded(row?.summary || candidate.snippet || candidate.subject, 220);
+    const actionItem = bounded(row?.actionItem || '', 180);
+    return {
+      sender: candidate.sender,
+      subject: candidate.subject,
+      summary,
+      snippet: summary,
+      date: candidate.date,
+      category,
+      priority,
+      actionItem,
+    };
+  });
+}
+
+async function syncGmail({ extract = extractMail, analyze = copilotJson } = {}) {
+  const rawItems = await extract();
+  if (!Array.isArray(rawItems) || !rawItems.length) {
+    return {
+      status: 'success',
+      items: [],
+      totalRead: 0,
+      urgentCount: 0,
+    };
+  }
+
+  const candidates = rawItems.slice(0, MAX_ITEMS).map((item, index) => ({
+    id: index,
+    sender: bounded(item.sender, 100),
+    subject: bounded(item.subject, 180),
+    snippet: bounded(item.snippet, MAX_SNIPPET),
+    date: bounded(item.date, 48),
+  }));
+
+  const prompt = academicMailPrompt(candidates);
+  let classified;
+  try {
+    let lastFormatError;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const raw = await analyze(
+          attempt
+            ? `Your previous answer did not follow the required schema. Return only the corrected JSON array, exactly ${candidates.length} objects, with integer id, string priority ("urgent", "high", "normal", or "low"), string category, string summary, and string actionItem. No prose or markdown.\nINPUT:\n${JSON.stringify(candidates)}`
+            : prompt,
+        );
+        classified = normalizeMailClassification(raw, candidates);
+        lastFormatError = null;
+        break;
+      } catch (error) {
+        lastFormatError = error;
+        if (
+          attempt ||
+          !/did not contain valid JSON|did not match the expected mail classification format/i.test(
+            error.message,
+          )
+        )
+          throw error;
+      }
+    }
+    if (lastFormatError) throw lastFormatError;
+  } catch (error) {
+    return {
+      status: 'partial',
+      items: [],
+      totalRead: candidates.length,
+      urgentCount: 0,
+      error: bounded(error.message, 220),
+    };
+  }
+
+  const approvedUrgent = classified.filter(
+    (item) => item.priority === 'urgent' || item.priority === 'high',
+  );
+
+  return {
+    status: 'success',
+    items: approvedUrgent,
+    totalRead: candidates.length,
+    urgentCount: approvedUrgent.length,
+  };
 }
 function persist(syncState) {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -508,8 +734,8 @@ function loadPersisted() {
 loadPersisted();
 async function syncAll({
   radar,
-  newton = syncNewton,
-  rishiverse = syncRishiverse,
+  newton = attendanceTask('newton'),
+  rishiverse = attendanceTask('rishiverse'),
   gmail = syncGmail,
 } = {}) {
   if (state.running) throw new Error('Sync all is already running');
@@ -528,11 +754,12 @@ async function syncAll({
       state.sources[key] = { status: 'running' };
       try {
         const value = await task();
-        state.sources[key] = { status: 'success', ...value };
+        const timestamp = new Date().toISOString();
+        state.sources[key] = { status: 'success', updatedAt: timestamp, ...value };
         if (key in academicSources && Array.isArray(value?.items))
           academicSources[key] = {
-            updatedAt: new Date().toISOString(),
-            items: value.items.slice(0, key === 'newton' ? 100 : 30),
+            updatedAt: timestamp,
+            items: value.items.slice(0, key === 'newton' ? 100 : key === 'rishiverse' ? 30 : 12),
           };
       } catch (error) {
         state.sources[key] = {
@@ -561,6 +788,10 @@ module.exports = {
   syncNewton,
   syncRishiverse,
   syncGmail,
+  extractMail,
+  academicMailPrompt,
+  normalizeMailClassification,
+  summarizeMail,
   MAX_ITEMS,
   MAX_SNIPPET,
   MAX_OUTPUT,

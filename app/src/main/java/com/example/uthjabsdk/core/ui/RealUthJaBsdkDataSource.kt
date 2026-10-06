@@ -28,6 +28,8 @@ import com.example.uthjabsdk.core.sync.SnapshotFetchResult
 import com.example.uthjabsdk.core.sync.SnapshotHttpClient
 import com.example.uthjabsdk.core.sync.SnapshotV1
 import com.example.uthjabsdk.core.sync.SnapshotValidator
+import com.example.uthjabsdk.core.sync.SyncRequestResult
+import com.example.uthjabsdk.core.sync.SyncRequestStatusResult
 import com.example.uthjabsdk.core.sync.ValidationResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +38,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -394,9 +397,10 @@ class RealUthJaBsdkDataSource(
         }
     }
 
-    // --- MANUAL HTTPS GET ON SYNC TAP ---
+    // --- MANUAL PHONE-TO-LAPTOP SYNC REQUEST ---
 
     override fun triggerSync() {
+        if (_syncState.value.isRunning) return
         val endpointUrl = credentialStorage.getEndpointUrl()
         if (endpointUrl.isNullOrBlank()) {
             _syncState.value = _syncState.value.copy(
@@ -419,66 +423,114 @@ class RealUthJaBsdkDataSource(
         )
 
         coroutineScope.launch {
-            when (val fetchResult = httpClient.fetchSnapshot(endpointUrl, readToken)) {
-                is SnapshotFetchResult.Success -> {
-                    when (val valResult = SnapshotValidator.validate(fetchResult.jsonString)) {
-                        is ValidationResult.Success -> {
-                            if (!fetchResult.sha256Hex.matches(Regex("[a-fA-F0-9]{64}")) ||
-                                !fetchResult.sha256Hex.equals(valResult.sha256Hex, ignoreCase = true)) {
-                                _syncState.value = _syncState.value.copy(
-                                    overallState = SyncOverallState.ERROR,
-                                    isRunning = false,
-                                    errorMessage = "Snapshot checksum did not match the server response"
-                                )
-                                return@launch
-                            }
-                            val snapshot = valResult.snapshot
-                            if (!snapshotCache.saveSnapshot(
-                                jsonString = fetchResult.jsonString,
-                                sha256Hex = valResult.sha256Hex,
-                                revision = snapshot.revision
-                            )) {
-                                _syncState.value = _syncState.value.copy(
-                                    overallState = SyncOverallState.ERROR,
-                                    isRunning = false,
-                                    errorMessage = "Could not save snapshot on this phone"
-                                )
-                                return@launch
-                            }
-                            applySnapshot(snapshot, isInitialCacheLoad = false)
-                        }
-                        is ValidationResult.Error -> {
+            val queueNotice = waitForLaptopSync(endpointUrl, readToken)
+            fetchAndApplySnapshot(endpointUrl, readToken, queueNotice)
+        }
+    }
+
+    private suspend fun waitForLaptopSync(endpointUrl: String, readToken: String?): String? {
+        val accepted = when (val result = httpClient.requestSync(endpointUrl, readToken)) {
+            is SyncRequestResult.Accepted -> result
+            is SyncRequestResult.HttpError -> if (result.statusCode == 429) {
+                return "Refresh request was rate-limited; showing latest saved data."
+            } else {
+                return "Laptop refresh request unavailable (HTTP ${result.statusCode}); showing latest saved data."
+            }
+            is SyncRequestResult.NetworkError ->
+                return "Could not reach the laptop refresh queue; showing latest saved data."
+        }
+        val deadline = System.currentTimeMillis() + 90_000
+        while (System.currentTimeMillis() < deadline) {
+            when (val status = httpClient.fetchSyncRequestStatus(endpointUrl, accepted.requestId, readToken)) {
+                is SyncRequestStatusResult.Success -> when (status.state) {
+                    "completed" -> return null
+                    "failed" -> return "Laptop refresh failed; showing the latest saved data."
+                    "expired" -> return "Laptop did not claim the refresh before it expired; showing latest saved data."
+                    "pending", "running" -> Unit
+                    else -> return "Laptop refresh status was invalid; showing latest saved data."
+                }
+                is SyncRequestStatusResult.HttpError -> return if (status.statusCode == 404 || status.statusCode == 410) {
+                    "Laptop refresh request expired or is no longer available; showing latest saved data."
+                } else {
+                    "Could not read laptop refresh status (HTTP ${status.statusCode}); showing latest saved data."
+                }
+                is SyncRequestStatusResult.NetworkError ->
+                    return "Lost contact with laptop refresh status; showing latest saved data."
+            }
+            delay(2_000)
+        }
+        return "Laptop refresh did not finish before the wait limit; showing latest saved data."
+    }
+
+    private suspend fun fetchAndApplySnapshot(
+        endpointUrl: String,
+        readToken: String?,
+        queueNotice: String?
+    ) {
+        when (val fetchResult = httpClient.fetchSnapshot(endpointUrl, readToken)) {
+            is SnapshotFetchResult.Success -> {
+                when (val valResult = SnapshotValidator.validate(fetchResult.jsonString)) {
+                    is ValidationResult.Success -> {
+                        if (!fetchResult.sha256Hex.matches(Regex("[a-fA-F0-9]{64}")) ||
+                            !fetchResult.sha256Hex.equals(valResult.sha256Hex, ignoreCase = true)) {
                             _syncState.value = _syncState.value.copy(
                                 overallState = SyncOverallState.ERROR,
                                 isRunning = false,
-                                errorMessage = "Validation failed: ${valResult.message}",
-                                sources = _syncState.value.sources.mapValues { (_, src) ->
-                                    src.copy(status = SyncSourceStateStatus.FAILED, message = "Validation rejected")
-                                }
+                                errorMessage = "Snapshot checksum did not match the server response"
                             )
+                            return
+                        }
+                        val snapshot = valResult.snapshot
+                        if (!snapshotCache.saveSnapshot(
+                            jsonString = fetchResult.jsonString,
+                            sha256Hex = valResult.sha256Hex,
+                            revision = snapshot.revision
+                        )) {
+                            _syncState.value = _syncState.value.copy(
+                                overallState = SyncOverallState.ERROR,
+                                isRunning = false,
+                                errorMessage = "Could not save snapshot on this phone"
+                            )
+                            return
+                        }
+                        applySnapshot(snapshot, isInitialCacheLoad = false)
+                        if (queueNotice != null) {
+                            _syncState.value = _syncState.value.copy(errorMessage = queueNotice)
                         }
                     }
+                    is ValidationResult.Error -> {
+                        _syncState.value = _syncState.value.copy(
+                            overallState = SyncOverallState.ERROR,
+                            isRunning = false,
+                            errorMessage = "Validation failed: ${valResult.message}",
+                            sources = _syncState.value.sources.mapValues { (_, src) ->
+                                src.copy(status = SyncSourceStateStatus.FAILED, message = "Validation rejected")
+                            }
+                        )
+                    }
                 }
-                is SnapshotFetchResult.HttpError -> {
-                    _syncState.value = _syncState.value.copy(
-                        overallState = SyncOverallState.ERROR,
-                        isRunning = false,
-                        errorMessage = "HTTP ${fetchResult.statusCode}: ${fetchResult.message}",
-                        sources = _syncState.value.sources.mapValues { (_, src) ->
-                            src.copy(status = SyncSourceStateStatus.FAILED, message = "HTTP ${fetchResult.statusCode}")
-                        }
-                    )
-                }
-                is SnapshotFetchResult.NetworkError -> {
-                    _syncState.value = _syncState.value.copy(
-                        overallState = SyncOverallState.ERROR,
-                        isRunning = false,
-                        errorMessage = "Network error: ${fetchResult.message}",
-                        sources = _syncState.value.sources.mapValues { (_, src) ->
-                            src.copy(status = SyncSourceStateStatus.FAILED, message = "Connection failed")
-                        }
-                    )
-                }
+            }
+            is SnapshotFetchResult.HttpError -> {
+                _syncState.value = _syncState.value.copy(
+                    overallState = SyncOverallState.ERROR,
+                    isRunning = false,
+                    errorMessage = "HTTP ${fetchResult.statusCode}: ${fetchResult.message}" +
+                        (queueNotice?.let { " $it" } ?: ""),
+                    sources = _syncState.value.sources.mapValues { (_, src) ->
+                        src.copy(status = SyncSourceStateStatus.FAILED, message = "HTTP ${fetchResult.statusCode}")
+                    }
+                )
+            }
+            is SnapshotFetchResult.NetworkError -> {
+                _syncState.value = _syncState.value.copy(
+                    overallState = SyncOverallState.ERROR,
+                    isRunning = false,
+                    errorMessage = "Network error: ${fetchResult.message}" +
+                        (queueNotice?.let { " $it" } ?: ""),
+                    sources = _syncState.value.sources.mapValues { (_, src) ->
+                        src.copy(status = SyncSourceStateStatus.FAILED, message = "Connection failed")
+                    }
+                )
             }
         }
     }

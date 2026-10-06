@@ -1,10 +1,15 @@
 import { httpRouter } from 'convex/server';
+import type { ApiFromModules } from 'convex/server';
+import type { Id } from './_generated/dataModel';
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
+import type * as mobileSyncRequests from './mobileSyncRequests';
 
 declare const process: { env: Record<string, string | undefined> };
 
 const http = httpRouter();
+const syncInternal = internal as typeof internal &
+  ApiFromModules<{ mobileSyncRequests: typeof mobileSyncRequests }>;
 const MAX_BODY_BYTES = 700_000;
 const encoder = new TextEncoder();
 
@@ -25,7 +30,7 @@ function jsonError(status: number, error: string): Response {
   return Response.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
-async function readLimitedBody(request: Request): Promise<string | null> {
+async function readLimitedBody(request: Request, maxBytes = MAX_BODY_BYTES): Promise<string | null> {
   if (!request.body) return '';
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -35,7 +40,7 @@ async function readLimitedBody(request: Request): Promise<string | null> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > MAX_BODY_BYTES) {
+      if (total > maxBytes) {
         await reader.cancel();
         return null;
       }
@@ -51,6 +56,23 @@ async function readLimitedBody(request: Request): Promise<string | null> {
     offset += chunk.byteLength;
   }
   return new TextDecoder('utf-8', { fatal: true }).decode(body);
+}
+
+async function hasEmptyBody(request: Request): Promise<boolean> {
+  if (!request.body) return true;
+  const reader = request.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return true;
+      if (value.byteLength > 0) {
+        await reader.cancel();
+        return false;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -163,6 +185,106 @@ http.route({
         'X-Snapshot-SHA256': current.sha256,
       },
     });
+  }),
+});
+
+http.route({
+  path: '/mobile/sync-request',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    if (!tokenMatches(request, process.env.MOBILE_READ_TOKEN))
+      return jsonError(401, 'Unauthorized');
+    if (!(await hasEmptyBody(request)))
+      return jsonError(400, 'Request body must be empty');
+    const result = await ctx.runMutation(syncInternal.mobileSyncRequests.create, {});
+    if (result.error === 'rate_limited') {
+      if (typeof result.retryAfterMs !== 'number') return jsonError(500, 'Invalid rate-limit response');
+      return Response.json(result, {
+        status: 429,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Retry-After': String(Math.ceil(result.retryAfterMs / 1000)),
+        },
+      });
+    }
+    return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
+  }),
+});
+
+http.route({
+  path: '/mobile/sync-request',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    if (!tokenMatches(request, process.env.MOBILE_READ_TOKEN))
+      return jsonError(401, 'Unauthorized');
+    const requestId = new URL(request.url).searchParams.get('id');
+    if (!requestId) return jsonError(400, 'Request id required');
+    try {
+      const status = await ctx.runMutation(syncInternal.mobileSyncRequests.readStatus, {
+        requestId: requestId as Id<'mobileSyncRequests'>,
+      });
+      if (!status) return jsonError(404, 'Sync request not found');
+      return Response.json(status, { headers: { 'Cache-Control': 'no-store' } });
+    } catch {
+      return jsonError(400, 'Invalid request id');
+    }
+  }),
+});
+
+http.route({
+  path: '/mobile/sync-request/claim',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    if (!tokenMatches(request, process.env.MOBILE_PUBLISH_TOKEN))
+      return jsonError(401, 'Unauthorized');
+    if (!(await hasEmptyBody(request)))
+      return jsonError(400, 'Request body must be empty');
+    const claimed = await ctx.runMutation(syncInternal.mobileSyncRequests.claimNext, {});
+    return Response.json(claimed, { headers: { 'Cache-Control': 'no-store' } });
+  }),
+});
+
+http.route({
+  pathPrefix: '/mobile/sync-request/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    if (!tokenMatches(request, process.env.MOBILE_PUBLISH_TOKEN))
+      return jsonError(401, 'Unauthorized');
+    if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
+      return jsonError(415, 'JSON required');
+    const requestId = new URL(request.url).pathname.slice('/mobile/sync-request/'.length);
+    if (!requestId || requestId.includes('/')) return jsonError(404, 'Unknown sync request path');
+    let body: string | null;
+    try {
+      body = await readLimitedBody(request, 200);
+    } catch {
+      return jsonError(400, 'Invalid UTF-8 body');
+    }
+    if (body === null || body.length > 200) return jsonError(413, 'Request too large');
+    let input: unknown;
+    try {
+      input = JSON.parse(body);
+    } catch {
+      return jsonError(400, 'Invalid JSON');
+    }
+    const state = isRecord(input) ? input.state : null;
+    if (!isRecord(input) || Object.keys(input).length !== 1 ||
+        (state !== 'completed' && state !== 'failed')) {
+      return jsonError(400, 'Expected state completed or failed');
+    }
+    try {
+      const result = await ctx.runMutation(syncInternal.mobileSyncRequests.complete, {
+        requestId: requestId as Id<'mobileSyncRequests'>,
+        state,
+      });
+      if (result.error === 'not_found' || result.error === 'expired' || result.error === 'not_claimed') {
+        const status = result.error === 'not_found' ? 404 : result.error === 'expired' ? 410 : 409;
+        return jsonError(status, result.error);
+      }
+      return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
+    } catch {
+      return jsonError(400, 'Invalid request id');
+    }
   }),
 });
 
