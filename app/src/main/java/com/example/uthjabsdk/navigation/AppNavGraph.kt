@@ -402,7 +402,7 @@ private fun MoreToolsMenuScreen(
 
         ToolNavigationCard(
             title = "Opportunity Radar",
-            subtitle = "Hackathons ranked for your skills, class schedule, and travel distance from Sonipat.",
+            subtitle = "Fresh public hackathons with clear source details and saved progress.",
             icon = UthJaIcons.Radar,
             onClick = { onSelectTool(Screen.Radar.route) }
         )

@@ -4,12 +4,19 @@ import type { Id } from './_generated/dataModel';
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
 import type * as mobileSyncRequests from './mobileSyncRequests';
+import type * as phoneActions from './phoneActions';
+import type * as radarCloud from './radarCloud';
+import { MAX_ACTION_BODY_BYTES, validPhoneActionState } from './phoneActionValidation';
 
 declare const process: { env: Record<string, string | undefined> };
 
 const http = httpRouter();
 const syncInternal = internal as typeof internal &
   ApiFromModules<{ mobileSyncRequests: typeof mobileSyncRequests }>;
+const actionInternal = internal as typeof internal &
+  ApiFromModules<{ phoneActions: typeof phoneActions }>;
+const radarInternal = internal as typeof internal &
+  ApiFromModules<{ radarCloud: typeof radarCloud }>;
 const MAX_BODY_BYTES = 700_000;
 const encoder = new TextEncoder();
 
@@ -185,6 +192,80 @@ http.route({
         'X-Snapshot-SHA256': current.sha256,
       },
     });
+  }),
+});
+
+// This is the independently scheduled public Unstop feed. It does not advance the
+// laptop-owned snapshot revision and contains no private campus or phone-action data.
+http.route({
+  path: '/mobile/radar',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    if (!tokenMatches(request, process.env.MOBILE_READ_TOKEN))
+      return jsonError(401, 'Unauthorized');
+    const current = await ctx.runQuery(radarInternal.radarCloud.readCurrent, {});
+    if (!current) return jsonError(404, 'No public Radar feed yet');
+    return new Response(current.payloadJson, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }),
+});
+
+// Private single-owner pilot. MOBILE_READ_TOKEN is shared by this owner's phone only;
+// a multi-user service must replace it with per-user authentication and owner-scoped rows.
+http.route({
+  path: '/mobile/actions',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    if (!tokenMatches(request, process.env.MOBILE_READ_TOKEN))
+      return jsonError(401, 'Unauthorized');
+    const current = await ctx.runQuery(actionInternal.phoneActions.readCurrent, {});
+    if (!current) return jsonError(404, 'No phone actions saved');
+    return Response.json({ schemaVersion: 1, revision: current.revision,
+      state: JSON.parse(current.payloadJson) },
+      { headers: { 'Cache-Control': 'no-store' } });
+  }),
+});
+
+http.route({
+  path: '/mobile/actions',
+  method: 'PUT',
+  handler: httpAction(async (ctx, request) => {
+    if (!tokenMatches(request, process.env.MOBILE_READ_TOKEN))
+      return jsonError(401, 'Unauthorized');
+    if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
+      return jsonError(415, 'JSON required');
+    let body: string | null;
+    try { body = await readLimitedBody(request, MAX_ACTION_BODY_BYTES); }
+    catch { return jsonError(400, 'Invalid UTF-8 body'); }
+    if (body === null) return jsonError(413, 'Phone actions too large');
+    let input: unknown;
+    try { input = JSON.parse(body); }
+    catch { return jsonError(400, 'Invalid JSON'); }
+    if (!isRecord(input) || Object.keys(input).some((key) =>
+      !['schemaVersion', 'expectedRevision', 'mutationId', 'state'].includes(key)) ||
+      input.schemaVersion !== 1 ||
+      !(input.expectedRevision === null ||
+        (typeof input.expectedRevision === 'number' &&
+          Number.isSafeInteger(input.expectedRevision) && input.expectedRevision >= 1)) ||
+      typeof input.mutationId !== 'string' ||
+      !/^[A-Za-z0-9_-]{8,128}$/.test(input.mutationId) ||
+      !validPhoneActionState(input.state)) return jsonError(400, 'Invalid phone actions');
+
+    const payloadJson = JSON.stringify(input.state);
+    const payloadSha256 = toHex(await crypto.subtle.digest('SHA-256', encoder.encode(payloadJson)));
+    const result = await ctx.runMutation(actionInternal.phoneActions.put, {
+      expectedRevision: input.expectedRevision,
+      mutationId: input.mutationId,
+      payloadJson,
+      payloadSha256,
+    });
+    if ('error' in result) {
+      const status = result.error === 'invalid_action_state' ? 400 : 409;
+      return Response.json(result, { status, headers: { 'Cache-Control': 'no-store' } });
+    }
+    return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
   }),
 });
 

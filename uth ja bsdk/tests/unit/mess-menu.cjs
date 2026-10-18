@@ -7,10 +7,17 @@ const fields = days
   .map((day) => `${day}:{${meals.map((meal) => `${meal}:["${day} ${meal}"]`).join(',')}}`)
   .join(',');
 const menu = extractMenu(`const x=1,g={${fields}},y=new Set([]);`);
+const renamed = extractMenu(`const x=1,v={${fields}},k=new Set([]);`);
 
 assert.deepEqual(menu.Friday.breakfast, ['Friday breakfast']);
 assert.deepEqual(menu.Sunday.dinner, ['Sunday dinner']);
 assert.deepEqual(Object.keys(menu), days);
+assert.deepEqual(renamed, menu);
+assert.deepEqual(
+  extractMenu(`v={${fields.replace('Monday breakfast', 'Monday { breakfast }')}},k=[]`)
+    .Monday.breakfast,
+  ['Monday { breakfast }'],
+);
 assert.throws(
   () => extractMenu('g={Monday:{breakfast:[globalThis.process]}} ,y=new Set('),
   /parsed safely/,

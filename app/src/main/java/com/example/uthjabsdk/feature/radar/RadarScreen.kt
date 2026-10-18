@@ -86,7 +86,7 @@ fun RadarScreen(
     val context = LocalContext.current
 
     var selectedScope by remember { mutableStateOf("all") } // "nearby", "local", "remote", "all"
-    var selectedDifficulty by remember { mutableStateOf("easy") } // "easy", "medium", "hard", "unverified"
+    var selectedDifficulty by remember { mutableStateOf("all") } // "all", "easy", "medium", "hard", "unverified"
     var selectedTier by remember { mutableStateOf("A") } // "S", "A", "B", "C", "D", "E"
     var onlyFavorites by remember { mutableStateOf(false) }
 
@@ -98,8 +98,11 @@ fun RadarScreen(
                 (selectedScope == "nearby" && item.areaScope in setOf("local", "remote")) ||
                 item.areaScope == selectedScope
             val favMatch = !onlyFavorites || item.saved
-            val diffMatch = if (selectedDifficulty == "unverified") item.difficulty == "unverified"
-            else item.difficulty == selectedDifficulty && item.tier == selectedTier
+            val diffMatch = when (selectedDifficulty) {
+                "all" -> true
+                "unverified" -> item.difficulty == "unverified"
+                else -> item.difficulty == selectedDifficulty && item.tier == selectedTier
+            }
             scopeMatch && favMatch && diffMatch
         }
     }
@@ -126,7 +129,7 @@ fun RadarScreen(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Nearby hackathons ranked for your skills, class schedule, and travel distance.",
+                text = "Explore public hackathons and track the ones you want to enter.",
                 style = Typography.bodyMedium.copy(color = ForestMuted)
             )
         }
@@ -139,7 +142,7 @@ fun RadarScreen(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Public Unstop and Devpost listings are updated on your laptop, then brought to this phone when you sync.",
+                text = "Public Unstop listings refresh in the cloud every 12 hours. Your laptop can add other sources when it runs.",
                 style = Typography.bodySmall.copy(color = ForestMuted)
             )
 
@@ -167,7 +170,7 @@ fun RadarScreen(
             // Skills Match
             Column {
                 Text(
-                    text = "Matching against what you know",
+                    text = "Your focus skills",
                     style = Typography.titleMedium.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 )
                 Spacer(modifier = Modifier.height(6.dp))
@@ -229,6 +232,7 @@ fun RadarScreen(
         // Difficulty Tabs
         SegmentTabs(
             tabs = listOf(
+                "all" to "All",
                 "easy" to "Easy",
                 "medium" to "Medium",
                 "hard" to "Hard",
@@ -240,7 +244,7 @@ fun RadarScreen(
         )
 
         // Tier selector if not unverified
-        if (selectedDifficulty != "unverified") {
+        if (selectedDifficulty !in setOf("all", "unverified")) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -372,7 +376,13 @@ private fun RadarCard(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                EyebrowBadge(text = "${opportunity.platform} · ${opportunity.areaScope.uppercase()}")
+                val scopeLabel = when (opportunity.areaScope) {
+                    "remote" -> "ONLINE"
+                    "local" -> "IN PERSON"
+                    "nearby" -> "NEARBY"
+                    else -> "LOCATION UNVERIFIED"
+                }
+                EyebrowBadge(text = "${opportunity.platform.uppercase()} · $scopeLabel")
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = opportunity.title,

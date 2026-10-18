@@ -121,6 +121,61 @@ function normalizeNewtonAttendance(payload) {
   return items;
 }
 
+function normalizeNewtonScorecard(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new UnsupportedPayloadError('Newton scorecard has no subject attendance rows.');
+  }
+  const names = new Set();
+  return rows.map((row) => {
+    const name = typeof row?.name === 'string' ? row.name.trim() : '';
+    const attended = countValue(row?.attended);
+    const conducted = countValue(row?.conducted);
+    if (!name || name.length > 100 || names.has(name) || attended === null ||
+        conducted === null || conducted === 0 || conducted > 10000 || attended > conducted) {
+      throw new UnsupportedPayloadError('Newton scorecard attendance row is invalid.');
+    }
+    names.add(name);
+    return { name, attended, conducted, percent: Math.round((attended / conducted) * 10000) / 100 };
+  });
+}
+
+function extractNewtonScorecardDom() {
+  const text = (node) => (node?.textContent || '').replace(/\s+/g, ' ').trim();
+  const headings = [...document.querySelectorAll('h3')];
+  const rows = [];
+  for (const heading of headings) {
+    const name = text(heading);
+    if (!name || name === 'Subject Details') continue;
+    let section = heading.parentElement;
+    let attendanceTable = null;
+    while (section && section !== document.body) {
+      const tables = [...section.querySelectorAll('table')];
+      attendanceTable = tables.find((table) => {
+        const headers = [...table.querySelectorAll('th')].map((cell) => text(cell).toUpperCase());
+        return headers.includes('CLASSES ATTENDED') && headers.includes('TOTAL CLASSES') &&
+          headers.includes('ATTENDANCE (%)');
+      });
+      if (attendanceTable && section.querySelectorAll('h3').length === 1) break;
+      attendanceTable = null;
+      section = section.parentElement;
+    }
+    if (!attendanceTable) continue;
+    const headers = [...attendanceTable.querySelectorAll('tr')]
+      .map((tr) => [...tr.children].map((cell) => text(cell).toUpperCase()))
+      .find((cells) => cells.includes('CLASSES ATTENDED') && cells.includes('TOTAL CLASSES'));
+    if (!headers) continue;
+    const attendedIndex = headers.indexOf('CLASSES ATTENDED');
+    const conductedIndex = headers.indexOf('TOTAL CLASSES');
+    const cells = [...attendanceTable.querySelectorAll('tr')]
+      .map((tr) => [...tr.children].map(text))
+      .find((cellTexts) => cellTexts[0]?.toLowerCase() === 'attendance');
+    if (!cells || !/^\d+$/.test(cells[attendedIndex] || '') ||
+        !/^\d+$/.test(cells[conductedIndex] || '')) continue;
+    rows.push({ name, attended: Number(cells[attendedIndex]), conducted: Number(cells[conductedIndex]) });
+  }
+  return rows;
+}
+
 function countValue(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
@@ -268,7 +323,7 @@ async function restrictTopLevelRedirects(page, source, { allowGoogleAccounts = f
       target.protocol !== 'https:' ||
       (target.hostname !== allowedHost && !allowedGoogleAuth)
     ) {
-      onBlocked();
+      onBlocked(target.toString());
       await route.abort();
       return;
     }
@@ -520,13 +575,16 @@ function createBrowserSources({
     }
   }
 
-  async function captureAttendance({ source, url, _retriedGoogle = false } = {}) {
+  async function captureAttendance({ source, url } = {}) {
     let context;
     let blockedRedirect = false;
+    let blockedGoogleSignIn = false;
     try {
       const target = sourceUrl(source, url);
       const navigateTarget = new URL(target.toString());
-      if (source === 'rishiverse') {
+      if (source === 'newton') {
+        navigateTarget.searchParams.set('tab', 'scorecard');
+      } else if (source === 'rishiverse') {
         navigateTarget.pathname = '/lms/attendance';
       }
       const browser = await getChromium();
@@ -536,8 +594,9 @@ function createBrowserSources({
       });
       const page = context.pages()[0] || (await context.newPage());
       await restrictTopLevelRedirects(page, source, {
-        onBlocked: () => {
+        onBlocked: (blockedUrl) => {
           blockedRedirect = true;
+          blockedGoogleSignIn = source === 'rishiverse' && isGoogleAccountsUrl(blockedUrl);
         },
       });
       const state = { items: null, error: null, semester: null, summaries: new Map() };
@@ -617,6 +676,37 @@ function createBrowserSources({
           'The site sign-in needs attention. Open the visible sign-in browser.',
         );
       }
+      if (/\/(?:login|sign-?in|auth|register)(?:\/|$)/i.test(new URL(landedUrl).pathname)) {
+        throw new BrowserSourceError(
+          'AUTH_REQUIRED',
+          'The saved browser sign-in expired or needs a manual step. Open the visible sign-in browser.',
+        );
+      }
+
+      if (source === 'newton' && typeof page.evaluate === 'function') {
+        try {
+          if (typeof page.waitForFunction === 'function') {
+            await page.waitForFunction(
+              () => [...document.querySelectorAll('table')].some((table) =>
+                [...table.querySelectorAll('th')].some((header) =>
+                  header.textContent?.trim().toUpperCase() === 'CLASSES ATTENDED',
+                ),
+              ),
+              null,
+              { timeout: responseTimeoutMs },
+            );
+          }
+          const scorecardRows = await page.evaluate(extractNewtonScorecardDom);
+          if (scorecardRows?.length) {
+            return { items: normalizeNewtonScorecard(scorecardRows) };
+          }
+        } catch (error) {
+          if (error instanceof UnsupportedPayloadError) {
+            throw new BrowserSourceError('UNSUPPORTED_RESPONSE', error.message);
+          }
+          // The page may still expose the existing lecture response path below.
+        }
+      }
 
       let timeoutHandle;
       const timeout = new Promise((resolve) => {
@@ -631,7 +721,7 @@ function createBrowserSources({
           typeof page.locator === 'function'
             ? await page.locator('input[type="password"]').count()
             : 0;
-        const loginRoute = /\/(?:login|sign-?in|auth)(?:\/|$)/i.test(new URL(page.url()).pathname);
+        const loginRoute = /\/(?:login|sign-?in|auth|register)(?:\/|$)/i.test(new URL(page.url()).pathname);
         const googleSignIn =
           source === 'rishiverse' && typeof page.getByRole === 'function'
             ? (await page.getByRole('button', { name: /^(continue with google|sign in with google|google)$/i }).count()) > 0
@@ -649,32 +739,10 @@ function createBrowserSources({
       }
       throw new BrowserSourceError('ATTENDANCE_UNAVAILABLE', 'No attendance data was returned.');
     } catch (error) {
-      if (
-        source === 'rishiverse' &&
-        !_retriedGoogle &&
-        (blockedRedirect || error.code === 'AUTH_REQUIRED')
-      ) {
-        if (context) {
-          try {
-            await context.close();
-          } catch {
-            context = null;
-            throw new BrowserSourceError(
-              'BROWSER_CLEANUP_FAILED',
-              'The isolated browser could not close cleanly.',
-            );
-          }
-          context = null;
-        }
-        const login = await openLogin({ source, url });
-        if (login.status === 'login_open' && login.autoSignedIn) {
-          await login.close();
-          return await captureAttendance({ source, url, _retriedGoogle: true });
-        }
-        if (login.close) await login.close();
+      if (blockedGoogleSignIn) {
         throw new BrowserSourceError(
           'AUTH_REQUIRED',
-          login.error?.message || googleAuthMessage('interactive_auth'),
+          'The saved browser sign-in expired or needs a manual step. Open the visible sign-in browser.',
         );
       }
       if (error instanceof BrowserSourceError) throw error;
@@ -710,7 +778,9 @@ module.exports = {
   captureAttendance,
   createBrowserSources,
   currentSemesterKey,
+  extractNewtonScorecardDom,
   normalizeNewtonAttendance,
+  normalizeNewtonScorecard,
   normalizeRishiverseAttendance,
   openLogin,
 };

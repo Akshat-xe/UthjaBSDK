@@ -1,6 +1,6 @@
 # Uth ja BSDK
 
-Local-first routine, academic dashboard, attendance, mail, campus menu, and opportunity radar. Express serves the browser app and local APIs; sync starts only when **Update all** is pressed in the shared top bar.
+Local-first routine, academic dashboard, attendance, campus menu, and opportunity radar. Academic Mail is intentionally Coming soon. Express serves the browser app and local APIs; sync can start from **Update all**, the configured 30-minute Mac schedule, or an authenticated Android **Sync now** request while the Mac server is awake.
 
 ## Run
 
@@ -24,7 +24,7 @@ Open [http://localhost:3000](http://localhost:3000). To use port 3001, run `PORT
 
 ## Update behavior
 
-The top-bar **Update all** starts one local sync for Newton attendance, RUFP attendance, Apple Mail, and Radar. Its dialog reports live source states and the completion time. Radar’s **Find events** remains a separate action for fetching public event listings. Configure Newton with `NEWTON_AUTH_TOKEN` and `NEWTON_COURSE_HASH`, and RUFP with `RISHIVERSE_AUTH_TOKEN` and `RISHIVERSE_ATTENDANCE_URL`. Mail is read from the local Apple Mail app. Missing setup or source failures appear as individual results; successful sources remain usable.
+The top-bar **Update all** starts one local sync for NST attendance, RUFP attendance, and Radar, then publishes a bounded phone snapshot. Academic Mail reports Coming soon; it is not captured in the current pipeline. Its dialog reports live source states and the completion time. Radar’s **Find events** remains a separate action for fetching public event listings. NST and RUFP use isolated browser profiles with interactive sign-in. Missing setup or source failures appear as individual results; successful sources remain usable. The scheduled and phone-request paths use the same non-overlapping pipeline.
 
 RU Print menu access is documented in [RU Print Menu API](docs/RU-PRINT-MENU-API.md). Architecture and migration phases are in [Feature guides and roadmap](docs/features/README.md).
 
@@ -39,6 +39,8 @@ node scripts/connect-attendance.cjs rishiverse
 
 Profiles are kept in `backend/data/browser-sources/` with `0700` permissions. Google sign-in selects the single saved `@rishihood.edu.in` or `@nst.rishihood.edu.in` account and prompts for manual interaction if password/MFA is required.
 
+The NST adapter opens the course scorecard and parses its subject attendance table, with a lecture-response fallback. Parser tests have passed; authenticated live NST and RUFP captures still require the one-time browser sign-ins and source verification.
+
 ## Auto-start at login (LaunchAgent)
 
 To run the local server automatically whenever the Mac is logged in and awake:
@@ -50,6 +52,8 @@ To run the local server automatically whenever the Mac is logged in and awake:
 ```
 
 When the Mac is asleep or powered off, the server does not execute; the Android app shows the latest saved snapshot with an offline/stale notice.
+
+With `SYNC_SCHEDULE_ENABLED=true` and `SYNC_SCHEDULE_INTERVAL=30m` in the local `.env`, the running Mac server repeats Update all every 30 minutes. Its separate phone-request worker checks the queue about every 7 seconds. The installed LaunchAgent and live server health were verified on 6 October; a later login relaunch and sleep cycle remain unobserved.
 
 ## Checks
 

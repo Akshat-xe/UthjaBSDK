@@ -1,20 +1,4 @@
 const tiers = ['S', 'A', 'B', 'C', 'D', 'E'];
-const flagshipOrganizers = [
-  'google',
-  'microsoft',
-  'major league hacking',
-  'mlh',
-  'smart india hackathon',
-  'sih',
-  'ethglobal',
-  'devfolio',
-  'iit',
-  'nit',
-  'iiit',
-  'bits',
-  'amazon',
-  'flipkart',
-];
 const profile = {
   primary: ['HTML', 'CSS', 'AI-assisted web building', 'prompt-led prototyping', 'automation'],
   learning: ['JavaScript basics', 'Python', 'APIs', 'practical machine learning'],
@@ -109,37 +93,17 @@ export function analyzeOpportunity(event) {
   if (skills.length) score += 6;
   score += Math.min(18, Math.round(fit * 18));
   score = Math.min(100, score);
-  const strongEvidence = [
-    organizer && !/independent \/ campus|community$/i.test(organizer),
-    description.length >= 700,
-    hasDates,
-    Boolean(event.registration_deadline),
-    Boolean(event.prize_pool),
-    fit >= 0.3,
-  ].filter(Boolean).length;
-  const flagship = flagshipOrganizers.some((name) =>
-    new RegExp(
-      `(?:^|[^a-z0-9])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^a-z0-9])`,
-      'i',
-    ).test(organizer),
-  );
-  const prizeTotal = [...String(event.prize_pool || '').matchAll(/\bINR\s*([\d,]+)/gi)].reduce(
-    (sum, m) => sum + Number(m[1].replace(/,/g, '')),
-    0,
-  );
-  const qualifiesForS =
-    score >= 90 && flagship && prizeTotal >= 50000 && fit >= 0.3 && strongEvidence >= 5;
-  let tier = qualifiesForS
-    ? 'S'
-    : score >= 80
-      ? 'A'
-      : score >= 66
-        ? 'B'
-        : score >= 52
-          ? 'C'
-          : score >= 38
-            ? 'D'
-            : 'E';
+  // Public listing fields and organizer keywords do not verify an event or prize.
+  // Reserve S for a future review path with explicit, auditable evidence.
+  const tier = score >= 80
+    ? 'A'
+    : score >= 66
+      ? 'B'
+      : score >= 52
+        ? 'C'
+        : score >= 38
+          ? 'D'
+          : 'E';
   const effort = effortSignals(event);
   const incomplete =
     !locationKnown ||
@@ -150,9 +114,7 @@ export function analyzeOpportunity(event) {
   const bucket = incomplete ? 'unverified' : effort.difficulty;
   const reason = incomplete
     ? 'Some event facts or a usable project scope are missing; verify the official listing.'
-    : tier === 'S'
-      ? 'Strong verified detail, recognized organizer, listed prize value, and high skill fit.'
-      : `Rule-based evidence score ${score}/100; matched ${skills.length || 0} skill signals.${score >= 90 && !qualifiesForS ? ' It does not meet the stricter S-tier proof requirements.' : ''}`;
+    : `Rule-based evidence score ${score}/100; matched ${skills.length || 0} skill signals. Verify organizer, prize, and eligibility on the official listing.`;
   const durationText = text(event.title + ' ' + description);
   const duration = durationText.match(/\b(\d{1,3})\s*[- ]?\s*(hours?|hrs?|days?)\b/i);
   const eventWindow = duration

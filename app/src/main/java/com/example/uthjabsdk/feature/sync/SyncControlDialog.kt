@@ -227,6 +227,12 @@ fun SyncControlDialog(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = syncStatus.phoneBackupMessage ?: "Phone actions are saved locally; pair to enable cloud recovery.",
+                    style = Typography.bodySmall.copy(color = ForestMuted, fontSize = 11.sp)
+                )
+
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Sources list
@@ -318,7 +324,8 @@ fun SyncControlDialog(
 
 @Composable
 private fun SyncSourceRow(source: SyncSourceState) {
-    val statusColor = when (source.status) {
+    val isDeferredMail = source.name == "gmail"
+    val statusColor = if (isDeferredMail) ForestMuted else when (source.status) {
         SyncSourceStateStatus.SUCCESS -> StatusGood
         SyncSourceStateStatus.PARTIAL -> StatusWarning
         SyncSourceStateStatus.FAILED -> StatusDanger
@@ -326,7 +333,7 @@ private fun SyncSourceRow(source: SyncSourceState) {
         else -> ForestMuted
     }
 
-    val statusText = when (source.status) {
+    val statusText = if (isDeferredMail) "Coming soon" else when (source.status) {
         SyncSourceStateStatus.RUNNING -> "In progress"
         SyncSourceStateStatus.SUCCESS -> "Done"
         SyncSourceStateStatus.PARTIAL -> "Partly updated"
@@ -349,9 +356,10 @@ private fun SyncSourceRow(source: SyncSourceState) {
                 text = source.label,
                 style = Typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             )
-            if (!source.message.isNullOrBlank()) {
+            val message = if (isDeferredMail) "Available in a future update" else source.message
+            if (!message.isNullOrBlank()) {
                 Text(
-                    text = source.message,
+                    text = message,
                     style = Typography.bodySmall.copy(color = ForestMuted, fontSize = 11.sp)
                 )
             }

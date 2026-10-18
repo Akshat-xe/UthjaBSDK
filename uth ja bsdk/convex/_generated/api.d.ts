@@ -8,9 +8,14 @@
  * @module
  */
 
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as mobileSnapshots from "../mobileSnapshots.js";
 import type * as mobileSyncRequests from "../mobileSyncRequests.js";
+import type * as phoneActionValidation from "../phoneActionValidation.js";
+import type * as phoneActions from "../phoneActions.js";
+import type * as radarCloud from "../radarCloud.js";
+import type * as radarUnstop from "../radarUnstop.js";
 
 import type {
   ApiFromModules,
@@ -19,9 +24,14 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  crons: typeof crons;
   http: typeof http;
   mobileSnapshots: typeof mobileSnapshots;
   mobileSyncRequests: typeof mobileSyncRequests;
+  phoneActionValidation: typeof phoneActionValidation;
+  phoneActions: typeof phoneActions;
+  radarCloud: typeof radarCloud;
+  radarUnstop: typeof radarUnstop;
 }>;
 
 /**

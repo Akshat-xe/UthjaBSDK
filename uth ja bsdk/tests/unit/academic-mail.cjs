@@ -259,7 +259,7 @@ process.env.RADAR_DATA_DIR = path.join(testData, 'radar');
   assert.equal(academicSources.gmail.items.length, 2);
   assert.equal(academicSources.gmail.items[0].subject, 'Urgent: Midterm Exam Rescheduled');
 
-  // Verify /api/academic reflects academicSources.gmail and NOT old emails.json
+  // Mail is deferred: no stored or legacy messages should reach the local academic API.
   const server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const testPort = server.address().port;
@@ -298,21 +298,7 @@ process.env.RADAR_DATA_DIR = path.join(testData, 'radar');
     const res = await makeRequest(testPort, { path: '/api/academic' });
     assert.equal(res.status, 200);
     const academicData = res.body;
-    assert.equal(academicData.emails.length, 2);
-    assert.equal(academicData.emails[0].priority, 'urgent');
-    assert.equal(academicData.emails[1].priority, 'high');
-    assert.equal(academicData.emails[0].actionItem, 'Appear for exam at Hall 4 Friday 10 AM.');
-    // Check schema compatibility with Android SnapshotEmail
-    for (const email of academicData.emails) {
-      assert.equal(typeof email.sender, 'string');
-      assert.equal(typeof email.subject, 'string');
-      assert.equal(typeof email.summary, 'string');
-      assert.equal(typeof email.date, 'string');
-      assert.equal(typeof email.category, 'string');
-      assert.equal(typeof email.priority, 'string');
-      assert.ok(email.priority === 'urgent' || email.priority === 'high');
-      assert.equal(typeof email.actionItem, 'string');
-    }
+    assert.deepEqual(academicData.emails, []);
   } finally {
     server.close();
   }

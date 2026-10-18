@@ -25,12 +25,18 @@ data class PhoneActionState(
     val customTasks: List<RoutineTask> = emptyList()
 )
 
+data class PhoneActionCloudReceipt(val revision: Long, val acknowledgedHash: String)
+
 class PhoneActionStorage(
     private val baseDir: File
 ) {
     private val storageDir = File(baseDir, "phone_actions").apply { mkdirs() }
     private val actionsFile = File(storageDir, "phone_actions.json")
     private val tmpFile = File(storageDir, "phone_actions.json.tmp")
+    private val receiptFile = File(storageDir, "cloud_receipt.json")
+    private val receiptTmpFile = File(storageDir, "cloud_receipt.json.tmp")
+
+    fun hasSavedActions(): Boolean = actionsFile.isFile
 
     @Synchronized
     fun save(state: PhoneActionState): Boolean {
@@ -69,6 +75,52 @@ class PhoneActionStorage(
 
     @Synchronized
     fun exportJson(): String? = load()?.let { JsonParser.toJson(serializeState(it)) }
+
+    @Synchronized
+    fun importJson(json: String): PhoneActionState? {
+        if (json.toByteArray(Charsets.UTF_8).size > 512 * 1024) return null
+        return try {
+            val root = JsonParser.parseObject(json)
+            if (!setOf("currentDate", "dayRecords", "foodEntries", "studyNotes", "wardrobe").all(root::containsKey)) {
+                return null
+            }
+            val state = deserializeState(root)
+            if (save(state)) state else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    @Synchronized
+    fun loadCloudReceipt(): PhoneActionCloudReceipt? = try {
+        val root = JsonParser.parseObject(receiptFile.readText(Charsets.UTF_8))
+        val revision = (root["revision"] as? Number)?.toLong()
+        val hash = root["acknowledgedHash"] as? String
+        if (revision == null || revision < 1 || hash?.matches(Regex("[a-f0-9]{64}")) != true) null
+        else PhoneActionCloudReceipt(revision, hash)
+    } catch (_: Exception) {
+        null
+    }
+
+    @Synchronized
+    fun saveCloudReceipt(receipt: PhoneActionCloudReceipt): Boolean = try {
+        val json = JsonParser.toJson(mapOf(
+            "revision" to receipt.revision,
+            "acknowledgedHash" to receipt.acknowledgedHash
+        ))
+        FileOutputStream(receiptTmpFile).use { fos ->
+            fos.write(json.toByteArray(Charsets.UTF_8))
+            fos.flush()
+            fos.fd.sync()
+        }
+        if (!receiptTmpFile.renameTo(receiptFile)) {
+            receiptTmpFile.copyTo(receiptFile, overwrite = true)
+            receiptTmpFile.delete()
+        }
+        true
+    } catch (_: Exception) {
+        false
+    }
 
     private fun serializeState(state: PhoneActionState): Map<String, Any?> {
         val root = mutableMapOf<String, Any?>()

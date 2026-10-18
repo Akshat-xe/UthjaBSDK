@@ -8,6 +8,12 @@ import com.example.uthjabsdk.core.sync.JsonParser
 import com.example.uthjabsdk.core.sync.MockSnapshotHttpClient
 import com.example.uthjabsdk.core.sync.PhoneActionState
 import com.example.uthjabsdk.core.sync.PhoneActionStorage
+import com.example.uthjabsdk.core.sync.PhoneActionHttpClient
+import com.example.uthjabsdk.core.sync.PhoneActionFetchResult
+import com.example.uthjabsdk.core.sync.PhoneActionPutResult
+import com.example.uthjabsdk.core.sync.RadarFeedFetchResult
+import com.example.uthjabsdk.core.sync.RadarFeedHttpClient
+import com.example.uthjabsdk.core.sync.RadarFeedParser
 import com.example.uthjabsdk.core.sync.SnapshotCache
 import com.example.uthjabsdk.core.sync.SnapshotFetchResult
 import com.example.uthjabsdk.core.sync.SnapshotValidator
@@ -30,6 +36,39 @@ import java.io.File
 import java.security.MessageDigest
 
 class IntegrationAndSyncTest {
+
+    private class FakePhoneActionHttpClient : PhoneActionHttpClient {
+        var state: String? = null
+        var revision = 0L
+        var puts = 0
+        var offline = false
+        override suspend fun fetch(endpointUrl: String, ownerToken: String): PhoneActionFetchResult =
+            if (offline) PhoneActionFetchResult.NetworkError else
+                state?.let { PhoneActionFetchResult.Success(revision, it) } ?: PhoneActionFetchResult.NotFound
+
+        override suspend fun put(endpointUrl: String, ownerToken: String, expectedRevision: Long?,
+            mutationId: String, stateJson: String): PhoneActionPutResult {
+            if (offline) return PhoneActionPutResult.NetworkError
+            puts++
+            if (expectedRevision != (revision.takeIf { state != null })) return PhoneActionPutResult.Conflict
+            state = stateJson
+            revision++
+            return PhoneActionPutResult.Success(revision)
+        }
+    }
+
+    private class FakeRadarFeedHttpClient(
+        var result: RadarFeedFetchResult = RadarFeedFetchResult.Unavailable
+    ) : RadarFeedHttpClient {
+        override suspend fun fetch(snapshotEndpoint: String, ownerToken: String): RadarFeedFetchResult = result
+    }
+
+    private fun cloudRadarJson(fetchedAt: String): String = """{
+        "schemaVersion":1,"source":"unstop","fetchedAt":"$fetchedAt",
+        "opportunities":[{"id":"opp-101","title":"Updated Unstop challenge",
+            "organizer":"Unstop","platform":"unstop","eventUrl":"https://unstop.com/hackathons/101",
+            "tier":"E","difficulty":"unverified","confidence":"low"}]
+    }""".trimIndent()
 
     @get:Rule
     val tempFolder = TemporaryFolder()
@@ -333,6 +372,69 @@ class IntegrationAndSyncTest {
     }
 
     @Test
+    fun testPhoneActions_freshInstallRestoresCloudBeforeAnyUpload() {
+        credentialStorage.setReadToken("a".repeat(40))
+        val cloud = FakePhoneActionHttpClient()
+        val cloudStorage = PhoneActionStorage(tempFolder.newFolder("cloud-seed"))
+        assertTrue(cloudStorage.save(PhoneActionState(
+            dayRecords = mapOf("2026-10-19" to com.example.uthjabsdk.core.model.DayRecord(
+                date = "2026-10-19", waterMl = 750)),
+            radarFavorites = setOf("opp-101")
+        )))
+        cloud.state = cloudStorage.exportJson()
+        cloud.revision = 3
+        val source = RealUthJaBsdkDataSource(
+            credentialStorage, snapshotCache, phoneActionStorage, mockHttpClient,
+            CoroutineScope(Dispatchers.Unconfined), cloud)
+
+        assertEquals(750, source.currentDay.value.waterMl)
+        assertTrue(phoneActionStorage.load()?.radarFavorites?.contains("opp-101") == true)
+        assertEquals(0, cloud.puts)
+        assertEquals(3L, phoneActionStorage.loadCloudReceipt()?.revision)
+    }
+
+    @Test
+    fun testPhoneActions_firstEditUploadsAndConflictingCloudIsPreserved() {
+        credentialStorage.setReadToken("a".repeat(40))
+        val cloud = FakePhoneActionHttpClient()
+        val source = RealUthJaBsdkDataSource(
+            credentialStorage, snapshotCache, phoneActionStorage, mockHttpClient,
+            CoroutineScope(Dispatchers.Unconfined), cloud)
+        assertEquals(0, cloud.puts) // the generated empty baseline must not erase a cloud account
+
+        source.addWater(250)
+        assertEquals(1, cloud.puts)
+        assertEquals(250, phoneActionStorage.load()?.dayRecords?.get(source.currentDate.value)?.waterMl)
+        assertEquals(1L, phoneActionStorage.loadCloudReceipt()?.revision)
+
+        val previousCloud = cloud.state
+        cloud.state = previousCloud?.replace("\"waterMl\":250", "\"waterMl\":900")
+        cloud.revision = 2
+        source.addWater(100)
+        assertEquals(1, cloud.puts)
+        assertEquals(350, phoneActionStorage.load()?.dayRecords?.get(source.currentDate.value)?.waterMl)
+        assertEquals(900, (JsonParser.parseObject(cloud.state!!)["dayRecords"] as Map<*, *>)
+            .let { it[source.currentDate.value] as Map<*, *> }["waterMl"])
+    }
+
+    @Test
+    fun testPhoneActions_offlineEditRetriesOnManualSync() {
+        credentialStorage.setReadToken("a".repeat(40))
+        val cloud = FakePhoneActionHttpClient().apply { offline = true }
+        val source = RealUthJaBsdkDataSource(
+            credentialStorage, snapshotCache, phoneActionStorage, mockHttpClient,
+            CoroutineScope(Dispatchers.Unconfined), cloud)
+        source.addWater(300)
+        assertEquals(300, phoneActionStorage.load()?.dayRecords?.get(source.currentDate.value)?.waterMl)
+        assertNull(phoneActionStorage.loadCloudReceipt())
+
+        cloud.offline = false
+        source.triggerSync()
+        assertEquals(1, cloud.puts)
+        assertEquals(1L, phoneActionStorage.loadCloudReceipt()?.revision)
+    }
+
+    @Test
     fun testPhoneActions_preservedAcrossSnapshotImports() = runBlocking {
         val dataSource = RealUthJaBsdkDataSource(
             credentialStorage = credentialStorage,
@@ -377,6 +479,54 @@ class IntegrationAndSyncTest {
         assertEquals("Building", opp.progress)
         assertEquals("AICTE", opp.organizer)
         assertEquals("A", opp.tier)
+    }
+
+    @Test
+    fun testCloudRadar_newerFeedPreservesPhoneFavoriteAndProgress() = runBlocking {
+        val parsed = RadarFeedParser.parse(cloudRadarJson("2026-10-01T12:00:00Z"))!!
+        val radar = FakeRadarFeedHttpClient(RadarFeedFetchResult.Success(parsed))
+        val source = RealUthJaBsdkDataSource(
+            credentialStorage, snapshotCache, phoneActionStorage, mockHttpClient,
+            CoroutineScope(Dispatchers.Unconfined), FakePhoneActionHttpClient(), radar
+        )
+        source.toggleRadarFavorite("opp-101")
+        source.setRadarProgress("opp-101", "Building")
+        source.triggerSync()
+
+        val item = source.radarItems.value.single()
+        assertEquals("Updated Unstop challenge", item.title)
+        assertTrue(item.saved)
+        assertEquals("Building", item.progress)
+        assertEquals("E", item.tier)
+        assertEquals(SyncSourceStateStatus.SUCCESS, source.syncState.value.sources["radar"]?.status)
+    }
+
+    @Test
+    fun testCloudRadar_olderOrUnavailableFeedKeepsLaptopRadar() = runBlocking {
+        val radar = FakeRadarFeedHttpClient(RadarFeedFetchResult.Success(
+            RadarFeedParser.parse(cloudRadarJson("2026-09-29T12:00:00Z"))!!
+        ))
+        val source = RealUthJaBsdkDataSource(
+            credentialStorage, snapshotCache, phoneActionStorage, mockHttpClient,
+            CoroutineScope(Dispatchers.Unconfined), FakePhoneActionHttpClient(), radar
+        )
+        source.triggerSync()
+        assertEquals("Smart India Hackathon 2026", source.radarItems.value.single().title)
+        radar.result = RadarFeedFetchResult.Unavailable
+        source.triggerSync()
+        assertEquals("Smart India Hackathon 2026", source.radarItems.value.single().title)
+        assertEquals(SyncOverallState.SUCCESS, source.syncState.value.overallState)
+    }
+
+    @Test
+    fun testCloudRadar_rejectsOversizedMalformedAndUnsafeFeeds() {
+        val feed = cloudRadarJson("2026-10-01T12:00:00Z")
+        assertNull(RadarFeedParser.parse(feed.replace("https://unstop.com", "javascript:alert(1)")))
+        assertNull(RadarFeedParser.parse(feed.replace("unstop.com", "unstop.com.evil.test")))
+        assertNull(RadarFeedParser.parse(feed.replace("\"unstop\"", "\"unknown\"")))
+        assertNull(RadarFeedParser.parse(feed.replace("2026-10-01T12:00:00Z", "bad-time")))
+        assertNull(RadarFeedParser.parse(feed + " ".repeat(256 * 1024)))
+        assertEquals(1, RadarFeedParser.parse(feed)?.opportunities?.size)
     }
 
     @Test

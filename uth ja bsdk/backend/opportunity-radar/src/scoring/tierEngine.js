@@ -111,13 +111,13 @@ export const tierEngine = {
       };
     }
 
-    // 1. Tier S: Flagship National/International Major or Massive Recognition
+    // Organizer keywords alone cannot establish a verified S-tier event.
     if (
       isFlagship &&
       (skillScore >= 0.2 || title.includes('hackathon') || title.includes('challenge'))
     ) {
       return {
-        tier: 'Tier S',
+        tier: 'Tier A',
         reason:
           'Recognized organizer keyword and skill alignment; verify organizer and eligibility.',
       };

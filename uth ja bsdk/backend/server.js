@@ -12,10 +12,6 @@ const {
   isProjectedSnapshot,
 } = require('./features/mobile-publish/publisher');
 const { projectSnapshot } = require('./features/mobile-publish/projection');
-const {
-  filterApprovedAcademicMail,
-  sanitizeStagedAcademicMail,
-} = require('./features/mobile-publish/mailFilter');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -361,11 +357,14 @@ async function publishCurrentMobileSnapshot(syncState) {
     try {
       const saved = JSON.parse(fs.readFileSync(mobileStageFile, 'utf8'));
       if (isProjectedSnapshot(saved) && (!runId || saved.runId === runId)) {
-        staged = sanitizeStagedAcademicMail(
-          saved,
-          process.env.MOBILE_ACADEMIC_MAIL_SENDERS,
-          `${new Date().toISOString()}-${randomUUID()}`,
-        );
+        staged = saved.academic.emails.length
+          ? {
+              ...saved,
+              revision: `${new Date().toISOString()}-${randomUUID()}`,
+              publishedAt: new Date().toISOString(),
+              academic: { ...saved.academic, emails: [] },
+            }
+          : saved;
         writeStage = staged !== saved;
       }
     } catch {
@@ -382,14 +381,7 @@ async function publishCurrentMobileSnapshot(syncState) {
         metadata,
         getAcademic: () => {
           const academic = getAcademicSnapshot();
-          return {
-            ...academic,
-            emails: filterApprovedAcademicMail(
-              academic.emails,
-              process.env.MOBILE_ACADEMIC_MAIL_SENDERS,
-              { requireUrgent: true },
-            ),
-          };
+          return { ...academic, emails: [] };
         },
         getRadar: async () => {
           const { database, rankAndLimit } = await getRadarModules();
@@ -492,6 +484,11 @@ async function executeSyncPipeline({ trigger = 'manual' } = {}) {
   try {
     syncState = await connectors.syncAll({
       radar: () => connectors.syncRadar({ harvest: () => startRadarHarvest('sync_all') }),
+      gmail: async () => {
+        const error = new Error('Academic mail is coming soon.');
+        error.code = 'CONFIG_REQUIRED';
+        throw error;
+      },
     });
   } catch (error) {
     mobilePublishState = { ...mobilePublishState, status: 'failed', reason: 'sync_failed' };
@@ -577,17 +574,13 @@ function getAcademicSnapshot() {
   };
   const data = readLocal('data.json');
   const savedAcademicSources = connectors.getAcademicSources();
-  const gmailSource = savedAcademicSources.gmail;
   const sourceTimestamps = Object.fromEntries(
-    Object.entries(savedAcademicSources).map(([name, source]) => [
+    Object.entries(savedAcademicSources).filter(([name]) => name !== 'gmail').map(([name, source]) => [
       name,
       source?.updatedAt ? { updatedAt: source.updatedAt } : null,
     ]),
   );
-  const mailUpdatedAt =
-    typeof gmailSource?.updatedAt === 'string' && Number.isFinite(Date.parse(gmailSource.updatedAt))
-      ? new Date(gmailSource.updatedAt).toISOString()
-      : null;
+  const mailUpdatedAt = null;
   if (!data)
     return {
       success: true,
@@ -690,23 +683,6 @@ function getAcademicSnapshot() {
     .filter(Boolean)
     .sort()
     .at(-1);
-  const rawMailItems = Array.isArray(gmailSource?.items) ? gmailSource.items : [];
-  const mailItems = rawMailItems.slice(0, 12).map((item) => ({
-    sender: String(item.sender || 'Academic notice').slice(0, 100),
-    subject: String(item.subject || item.aiTitle || 'No subject').slice(0, 180),
-    snippet: String(item.summary || item.snippet || '')
-      .replace(/\\s+/g, ' ')
-      .slice(0, 220),
-    summary: String(item.summary || item.snippet || '')
-      .replace(/\\s+/g, ' ')
-      .slice(0, 220),
-    date: String(item.dateOnly || item.date || '').slice(0, 48),
-    category: String(item.category || 'Academic').slice(0, 48),
-    priority: String(item.priority || item.urgency || '').slice(0, 24),
-    actionItem: String(item.actionItem || '')
-      .replace(/\\s+/g, ' ')
-      .slice(0, 180),
-  }));
   return {
     success: true,
     available: true,
@@ -788,7 +764,7 @@ function getAcademicSnapshot() {
       status: String(item.status || '').slice(0, 48),
       urgent: !!item.urgent,
     })),
-    emails: mailItems,
+    emails: [],
   };
 }
 

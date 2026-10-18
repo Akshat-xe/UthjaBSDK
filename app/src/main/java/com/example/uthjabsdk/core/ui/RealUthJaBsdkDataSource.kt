@@ -20,13 +20,23 @@ import com.example.uthjabsdk.core.model.TaskRecord
 import com.example.uthjabsdk.core.model.WardrobeItem
 import com.example.uthjabsdk.core.model.WeeklyTimetableDay
 import com.example.uthjabsdk.core.sync.DefaultSnapshotHttpClient
+import com.example.uthjabsdk.core.sync.DefaultPhoneActionHttpClient
+import com.example.uthjabsdk.core.sync.DefaultRadarFeedHttpClient
+import com.example.uthjabsdk.core.sync.PhoneActionCloudReceipt
+import com.example.uthjabsdk.core.sync.PhoneActionFetchResult
+import com.example.uthjabsdk.core.sync.PhoneActionHttpClient
+import com.example.uthjabsdk.core.sync.PhoneActionPutResult
 import com.example.uthjabsdk.core.sync.PhoneActionState
 import com.example.uthjabsdk.core.sync.PhoneActionStorage
+import com.example.uthjabsdk.core.sync.RadarFeed
+import com.example.uthjabsdk.core.sync.RadarFeedFetchResult
+import com.example.uthjabsdk.core.sync.RadarFeedHttpClient
 import com.example.uthjabsdk.core.sync.SecureCredentialStorage
 import com.example.uthjabsdk.core.sync.SnapshotCache
 import com.example.uthjabsdk.core.sync.SnapshotFetchResult
 import com.example.uthjabsdk.core.sync.SnapshotHttpClient
 import com.example.uthjabsdk.core.sync.SnapshotV1
+import com.example.uthjabsdk.core.sync.SnapshotRadarOpportunity
 import com.example.uthjabsdk.core.sync.SnapshotValidator
 import com.example.uthjabsdk.core.sync.SyncRequestResult
 import com.example.uthjabsdk.core.sync.SyncRequestStatusResult
@@ -39,6 +49,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -57,7 +70,9 @@ class RealUthJaBsdkDataSource(
     private val snapshotCache: SnapshotCache,
     private val phoneActionStorage: PhoneActionStorage,
     private val httpClient: SnapshotHttpClient = DefaultSnapshotHttpClient(),
-    private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob()),
+    private val actionHttpClient: PhoneActionHttpClient = DefaultPhoneActionHttpClient(),
+    private val radarHttpClient: RadarFeedHttpClient = DefaultRadarFeedHttpClient()
 ) : UthJaBsdkDataSource {
 
     override fun exportPhoneActions(): String? = phoneActionStorage.exportJson()
@@ -93,7 +108,7 @@ class RealUthJaBsdkDataSource(
         private val DEFAULT_SOURCES = mapOf(
             "newton" to SyncSourceState("newton", "NST attendance", SyncSourceStateStatus.WAITING, "Waiting for sync"),
             "rishiverse" to SyncSourceState("rishiverse", "RUFP attendance", SyncSourceStateStatus.WAITING, "Waiting for sync"),
-            "gmail" to SyncSourceState("gmail", "Academic mail", SyncSourceStateStatus.WAITING, "Waiting for sync"),
+            "gmail" to SyncSourceState("gmail", "Academic mail", SyncSourceStateStatus.WAITING, "Available in a future update"),
             "radar" to SyncSourceState("radar", "Opportunity Radar", SyncSourceStateStatus.WAITING, "Waiting for sync"),
             "menu" to SyncSourceState("menu", "Campus mess menu", SyncSourceStateStatus.WAITING, "Waiting for sync")
         )
@@ -172,9 +187,18 @@ class RealUthJaBsdkDataSource(
     private var userRadarProgress = mutableMapOf<String, String>()
     private val customTasks = mutableListOf<RoutineTask>()
     private var activeSnapshot: SnapshotV1? = null
+    private var latestCloudRadar: RadarFeed? = null
+    private val actionSyncMutex = Mutex()
+    private val hadSavedActionsAtStartup = phoneActionStorage.hasSavedActions()
+    private var initialActionsHash: String? = null
 
     init {
         loadPersistedState()
+        initialActionsHash = phoneActionStorage.exportJson()?.let(::sha256)
+        if (initialActionsHash != null && credentialStorage.getEndpointUrl() != null &&
+            (credentialStorage.getReadToken()?.length ?: 0) >= 32) {
+            coroutineScope.launch { syncPhoneActions() }
+        }
     }
 
     private fun loadPersistedState() {
@@ -222,7 +246,107 @@ class RealUthJaBsdkDataSource(
             eventLogs = _eventLogs.value,
             customTasks = customTasks.toList()
         )
-        phoneActionStorage.save(state)
+        if (!phoneActionStorage.save(state)) {
+            _syncState.value = _syncState.value.copy(errorMessage = "Phone action could not be saved locally")
+            return
+        }
+        if (initialActionsHash != null && credentialStorage.getEndpointUrl() != null &&
+            (credentialStorage.getReadToken()?.length ?: 0) >= 32) {
+            coroutineScope.launch { syncPhoneActions() }
+        }
+    }
+
+    private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
+    private fun applyRestoredPhoneActions(state: PhoneActionState) {
+        _currentDate.value = LocalDate.now().toString()
+        _alarmsEnabled.value = state.alarmsEnabled
+        _allDays.value = state.dayRecords
+        _currentDay.value = state.dayRecords[_currentDate.value] ?: DayRecord(date = _currentDate.value)
+        _foodEntries.value = state.foodEntries
+        _wardrobe.value = state.wardrobe
+        _studyNotes.value = state.studyNotes
+        _eventLogs.value = state.eventLogs
+        userRadarFavorites.clear()
+        userRadarFavorites.addAll(state.radarFavorites)
+        userRadarProgress.clear()
+        userRadarProgress.putAll(state.radarProgress)
+        customTasks.clear()
+        customTasks.addAll(state.customTasks)
+        _tasksRevision.value += 1
+        activeSnapshot?.let { applySnapshot(it, isInitialCacheLoad = true) }
+    }
+
+    /** Reconcile once after pairing/start and after edits. Never replace divergent local and cloud records. */
+    private suspend fun syncPhoneActions(): String? = actionSyncMutex.withLock {
+        val endpoint = credentialStorage.getEndpointUrl() ?: return@withLock "Pairing required for phone backup"
+        val token = credentialStorage.getReadToken() ?: return@withLock "Pairing key required for phone backup"
+        val localJson = phoneActionStorage.exportJson()
+            ?: return@withLock "Phone actions could not be read from local storage"
+        val localHash = sha256(localJson)
+        val receipt = phoneActionStorage.loadCloudReceipt()
+        val remote = actionHttpClient.fetch(endpoint, token)
+        val remoteRevision: Long? = when (remote) {
+            PhoneActionFetchResult.NotFound -> {
+                if (receipt != null) return@withLock "Cloud backup is missing; local actions were kept"
+                if (!hadSavedActionsAtStartup && localHash == initialActionsHash) return@withLock null
+                null
+            }
+            is PhoneActionFetchResult.Success -> {
+                val remoteState = try {
+                    com.example.uthjabsdk.core.sync.JsonParser.parseObject(remote.stateJson)
+                } catch (_: Exception) {
+                    return@withLock "Cloud backup format was rejected; local actions were kept"
+                }
+                val remoteHash = sha256(com.example.uthjabsdk.core.sync.JsonParser.toJson(remoteState))
+                if (remoteHash == localHash) {
+                    phoneActionStorage.saveCloudReceipt(PhoneActionCloudReceipt(remote.revision, localHash))
+                    return@withLock null
+                }
+                val localWasNotEdited = localHash == initialActionsHash && !hadSavedActionsAtStartup
+                val serverIsAheadOfCleanLocal = receipt != null && localHash == receipt.acknowledgedHash &&
+                    remote.revision >= receipt.revision
+                if (localWasNotEdited || serverIsAheadOfCleanLocal) {
+                    val restored = phoneActionStorage.importJson(remote.stateJson)
+                        ?: return@withLock "Cloud backup could not be saved; local actions were kept"
+                    val savedJson = phoneActionStorage.exportJson()
+                        ?: return@withLock "Restored phone actions could not be read"
+                    if (!phoneActionStorage.saveCloudReceipt(
+                        PhoneActionCloudReceipt(remote.revision, sha256(savedJson))
+                    )) return@withLock "Cloud backup receipt could not be saved"
+                    applyRestoredPhoneActions(restored)
+                    initialActionsHash = sha256(savedJson)
+                    return@withLock null
+                }
+                if (receipt?.revision != remote.revision) {
+                    return@withLock "Phone and cloud actions differ; neither copy was overwritten"
+                }
+                remote.revision
+            }
+            is PhoneActionFetchResult.HttpError ->
+                return@withLock "Phone backup unavailable (HTTP ${remote.status}); local actions were kept"
+            PhoneActionFetchResult.NetworkError ->
+                return@withLock "Phone backup is offline; local actions will retry on the next edit or Sync"
+        }
+        val result = actionHttpClient.put(endpoint, token, remoteRevision, UUID.randomUUID().toString(), localJson)
+        when (result) {
+            is PhoneActionPutResult.Success -> {
+                if (!phoneActionStorage.saveCloudReceipt(PhoneActionCloudReceipt(result.revision, localHash))) {
+                    "Cloud saved actions but the local receipt could not be saved"
+                } else null
+            }
+            PhoneActionPutResult.Conflict -> "Phone and cloud actions changed at the same time; neither copy was overwritten"
+            is PhoneActionPutResult.HttpError -> "Phone backup upload failed (HTTP ${result.status}); local actions were kept"
+            PhoneActionPutResult.NetworkError -> "Phone backup upload is offline; local actions will retry on the next edit or Sync"
+        }
+    }.also { error ->
+        _syncState.value = _syncState.value.copy(
+            phoneBackupMessage = if (error != null) "Saved on phone; $error"
+                else if (phoneActionStorage.loadCloudReceipt() != null) "Phone actions saved in Convex"
+                else "Cloud backup starts after your first phone action"
+        )
     }
 
     /**
@@ -302,33 +426,12 @@ class RealUthJaBsdkDataSource(
         }
 
         // Radar Opportunities: merge server listings with phone favorites and progress
-        _radarItems.value = snapshot.radar.opportunities.map { opp ->
-            val isFav = userRadarFavorites.contains(opp.id)
-            val prog = userRadarProgress[opp.id] ?: "Not started"
-            val hours = opp.effortHours?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() } ?: 20
-            RadarOpportunity(
-                id = opp.id,
-                title = opp.title,
-                organizer = opp.organizer,
-                platform = opp.platform,
-                areaScope = opp.areaScope,
-                location = if (opp.locationLabel.isNotBlank()) opp.locationLabel else opp.location,
-                distanceKm = opp.distanceKm?.toInt(),
-                startDate = opp.startDate,
-                endDate = opp.endDate,
-                registrationDeadline = opp.registrationDeadline,
-                prizePool = opp.prizePool,
-                teamSize = opp.teamSize ?: "Individual",
-                tier = opp.tier,
-                difficulty = opp.difficulty,
-                description = opp.description ?: opp.summary ?: "",
-                eventUrl = opp.eventUrl,
-                effortHours = hours,
-                confidence = opp.confidence ?: "Medium",
-                saved = isFav,
-                progress = prog
-            )
+        val cloudRadar = latestCloudRadar?.takeIf { feed ->
+            val snapshotTime = try { snapshot.radar.fetchedAt?.let(Instant::parse) }
+                catch (_: Exception) { null }
+            snapshotTime == null || feed.fetchedAt.isAfter(snapshotTime)
         }
+        applyRadarOpportunities(cloudRadar?.opportunities ?: snapshot.radar.opportunities)
 
         // Campus Meal Menu
         if (snapshot.menu.menu.isNotEmpty()) {
@@ -364,16 +467,23 @@ class RealUthJaBsdkDataSource(
                 else -> "No recent update"
             }
             SyncSourceState(name, label, status, msg)
+        }.toMutableMap()
+        if (cloudRadar != null) {
+            mappedSources["radar"] = SyncSourceState(
+                "radar", "Opportunity Radar", SyncSourceStateStatus.SUCCESS,
+                "Unstop feed updated ${formatTimestamp(cloudRadar.fetchedAt.toString())}"
+            )
         }
 
         _syncState.value = SyncStatus(
-            overallState = if (mappedSources.values.all { it.status == SyncSourceStateStatus.SUCCESS })
+            overallState = if (mappedSources.filterKeys { it != "gmail" }.values.all { it.status == SyncSourceStateStatus.SUCCESS })
                 SyncOverallState.SUCCESS else SyncOverallState.PARTIAL,
             isRunning = false,
             lastSyncTime = formatTimestamp(snapshot.publishedAt),
             revision = snapshot.revision,
             sources = mappedSources,
-            errorMessage = null
+            errorMessage = null,
+            phoneBackupMessage = _syncState.value.phoneBackupMessage
         )
 
         if (!isInitialCacheLoad && previousRevision != snapshot.revision) {
@@ -384,6 +494,37 @@ class RealUthJaBsdkDataSource(
             )
             persistPhoneActions()
         }
+    }
+
+    private fun applyRadarOpportunities(opportunities: List<SnapshotRadarOpportunity>) {
+        _radarItems.value = opportunities.map { opp ->
+            val isFav = userRadarFavorites.contains(opp.id)
+            val prog = userRadarProgress[opp.id] ?: "Not started"
+            val hours = opp.effortHours?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() }
+            RadarOpportunity(
+                id = opp.id,
+                title = opp.title,
+                organizer = opp.organizer,
+                platform = opp.platform,
+                areaScope = opp.areaScope,
+                location = if (opp.locationLabel.isNotBlank()) opp.locationLabel else opp.location,
+                distanceKm = opp.distanceKm?.toInt(),
+                startDate = opp.startDate,
+                endDate = opp.endDate,
+                registrationDeadline = opp.registrationDeadline,
+                prizePool = opp.prizePool,
+                teamSize = opp.teamSize,
+                tier = opp.tier,
+                difficulty = opp.difficulty,
+                description = opp.description ?: opp.summary ?: "",
+                eventUrl = opp.eventUrl,
+                effortHours = hours,
+                confidence = opp.confidence,
+                saved = isFav,
+                progress = prog
+            )
+        }
+
     }
 
     private fun parseTimeToMinutes(timeStr: String): Int {
@@ -423,9 +564,31 @@ class RealUthJaBsdkDataSource(
         )
 
         coroutineScope.launch {
+            launch { syncPhoneActions() }
             val queueNotice = waitForLaptopSync(endpointUrl, readToken)
             fetchAndApplySnapshot(endpointUrl, readToken, queueNotice)
+            if (!readToken.isNullOrBlank()) fetchAndApplyCloudRadar(endpointUrl, readToken)
         }
+    }
+
+    private suspend fun fetchAndApplyCloudRadar(endpointUrl: String, readToken: String) {
+        val result = radarHttpClient.fetch(endpointUrl, readToken)
+        if (result !is RadarFeedFetchResult.Success) return
+        val feed = result.feed
+        val snapshotTime = try { activeSnapshot?.radar?.fetchedAt?.let(Instant::parse) }
+            catch (_: Exception) { null }
+        if (snapshotTime != null && !feed.fetchedAt.isAfter(snapshotTime)) return
+        if (latestCloudRadar?.fetchedAt?.isAfter(feed.fetchedAt) == true) return
+        latestCloudRadar = feed
+        applyRadarOpportunities(feed.opportunities)
+        _syncState.value = _syncState.value.copy(
+            sources = _syncState.value.sources + (
+                "radar" to SyncSourceState(
+                    "radar", "Opportunity Radar", SyncSourceStateStatus.SUCCESS,
+                    "Unstop feed updated ${formatTimestamp(feed.fetchedAt.toString())}"
+                )
+            )
+        )
     }
 
     private suspend fun waitForLaptopSync(endpointUrl: String, readToken: String?): String? {
@@ -546,19 +709,23 @@ class RealUthJaBsdkDataSource(
         if (!token.isNullOrBlank()) credentialStorage.setReadToken(token)
         if (endpoint.isNullOrBlank()) {
             _syncState.value = _syncState.value.copy(
-                errorMessage = "Phone not paired with Convex"
+                errorMessage = "Phone not paired with Convex",
+                phoneBackupMessage = "Phone actions are saved only on this device"
             )
         } else {
             _syncState.value = _syncState.value.copy(
-                errorMessage = null
+                errorMessage = null,
+                phoneBackupMessage = "Checking phone backup…"
             )
+            if (credentialStorage.getReadToken() != null) coroutineScope.launch { syncPhoneActions() }
         }
     }
 
     fun clearPairing() {
         credentialStorage.clear()
         _syncState.value = _syncState.value.copy(
-            errorMessage = "Phone not paired with Convex"
+            errorMessage = "Phone not paired with Convex",
+            phoneBackupMessage = "Phone actions are saved only on this device"
         )
     }
 

@@ -180,7 +180,7 @@ export const database = {
 
   getAllOpportunities(filters = {}) {
     db.prepare(
-      "UPDATE opportunities SET status = 'expired' WHERE status = 'active' AND registration_deadline IS NOT NULL AND julianday(registration_deadline) < julianday('now')",
+      "UPDATE opportunities SET status = 'expired' WHERE status = 'active' AND ((registration_deadline IS NOT NULL AND julianday(registration_deadline) < julianday('now')) OR (end_date IS NOT NULL AND julianday(end_date) < julianday('now')))",
     ).run();
     let query = 'SELECT * FROM opportunities WHERE 1=1';
     const params = [];

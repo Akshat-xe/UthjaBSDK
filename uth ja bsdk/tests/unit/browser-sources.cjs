@@ -5,7 +5,9 @@ const path = require('node:path');
 const {
   createBrowserSources,
   currentSemesterKey,
+  extractNewtonScorecardDom,
   normalizeNewtonAttendance,
+  normalizeNewtonScorecard,
   normalizeRishiverseAttendance,
 } = require('../../backend/features/sync/browserSources');
 
@@ -13,10 +15,27 @@ function response(url, status, payload) {
   return { url: () => url, status: () => status, json: async () => payload };
 }
 
+function domNode(tagName, children = [], value = '') {
+  const node = {
+    tagName: tagName.toUpperCase(),
+    children,
+    parentElement: null,
+    get textContent() { return value || children.map((child) => child.textContent).join(''); },
+    querySelectorAll(tag) {
+      return children.flatMap((child) => [
+        ...(child.tagName === tag.toUpperCase() ? [child] : []),
+        ...child.querySelectorAll(tag),
+      ]);
+    },
+  };
+  children.forEach((child) => { child.parentElement = node; });
+  return node;
+}
+
 function mockChromium(
   onNavigate,
   landingUrl = 'https://my.newtonschool.co/course/viwuaeik1m82/details',
-  { accountCount = 0, googleButtonCount = 0 } = {},
+  { accountCount = 0, googleButtonCount = 0, scorecardRows = null } = {},
 ) {
   let currentUrl = landingUrl;
   const page = {
@@ -67,6 +86,8 @@ function mockChromium(
     locator() {
       return { count: async () => 0 };
     },
+    async waitForFunction() {},
+    async evaluate() { return scorecardRows; },
   };
   const launches = [];
   return {
@@ -96,6 +117,42 @@ async function main() {
     /unsupported lecture record/,
   );
   assert.throws(() => normalizeNewtonAttendance({ results: [] }), /No Newton lecture records/);
+  assert.deepEqual(
+    normalizeNewtonScorecard([
+      { name: 'S&AI - D', attended: 10, conducted: 12 },
+      { name: 'Maths I - D', attended: 8, conducted: 11 },
+    ]),
+    [
+      { name: 'S&AI - D', attended: 10, conducted: 12, percent: 83.33 },
+      { name: 'Maths I - D', attended: 8, conducted: 11, percent: 72.73 },
+    ],
+  );
+  assert.throws(
+    () => normalizeNewtonScorecard([{ name: 'Maths I - D', attended: 12, conducted: 11 }]),
+    /row is invalid/,
+  );
+  const scorecardTable = domNode('table', [
+    domNode('tr', ['SUBJECT', 'TOTAL CLASSES', 'ATTENDANCE (%)', 'CLASSES ATTENDED']
+      .map((value) => domNode('th', [], value))),
+    domNode('tr', [
+      domNode('th', [], 'Attendance'),
+      domNode('td', [], '12'),
+      domNode('td', [], '83.33'),
+      domNode('td', [], '10'),
+    ]),
+  ]);
+  const scorecardBody = domNode('body', [
+    domNode('section', [domNode('h3', [], 'S&AI - D'), scorecardTable]),
+  ]);
+  const priorDocument = global.document;
+  try {
+    global.document = { body: scorecardBody, querySelectorAll: (tag) => scorecardBody.querySelectorAll(tag) };
+    assert.deepEqual(extractNewtonScorecardDom(), [
+      { name: 'S&AI - D', attended: 10, conducted: 12 },
+    ]);
+  } finally {
+    global.document = priorDocument;
+  }
 
   assert.deepEqual(
     normalizeRishiverseAttendance({
@@ -154,8 +211,22 @@ async function main() {
     });
     assert.equal(mock.launches[0].options.headless, true);
     assert.equal(fs.statSync(mock.launches[0].profile).mode & 0o777, 0o700);
-    assert.equal(newtonTarget[0], 'https://my.newtonschool.co/course/viwuaeik1m82/details');
+    assert.equal(newtonTarget[0], 'https://my.newtonschool.co/course/viwuaeik1m82/details?tab=scorecard');
     assert.deepEqual(await source.captureAttendance({ source: 'newton' }), result);
+
+    const scorecardMock = mockChromium(
+      async () => {},
+      'https://my.newtonschool.co/course/viwuaeik1m82/details?tab=scorecard',
+      { scorecardRows: [{ name: 'S&AI - D', attended: 10, conducted: 12 }] },
+    );
+    const scorecardSource = createBrowserSources({
+      chromium: scorecardMock.chromium,
+      profileRoot: path.join(temp, 'scorecard'),
+      responseTimeoutMs: 50,
+    });
+    assert.deepEqual(await scorecardSource.captureAttendance({ source: 'newton' }), {
+      items: [{ name: 'S&AI - D', attended: 10, conducted: 12, percent: 83.33 }],
+    });
 
     const rishiverseMock = mockChromium(
       async (page) => {
@@ -211,62 +282,32 @@ async function main() {
       (error) => error.code === 'ATTENDANCE_UNAVAILABLE',
     );
 
-    let initialRedirectBlocked = false;
-    let visibleLoginOpened = false;
-    const retryMock = mockChromium(
-      async (page, _url, headless) => {
-        if (headless && !initialRedirectBlocked) {
-          await page.routes[0]({
-            request: () => ({
-              isNavigationRequest: () => true,
-              frame: () => page,
-              url: () => 'https://accounts.google.com/signin/v2/identifier',
-            }),
-            abort: async () => {
-              initialRedirectBlocked = true;
-            },
-            continue: async () => assert.fail('headless OAuth navigation must be blocked'),
-          });
-          throw new Error('headless Google redirect blocked');
-        }
-        if (!headless && !visibleLoginOpened) {
-          visibleLoginOpened = true;
-          page.setUrl('https://accounts.google.com/signin/v2/identifier');
-          return;
-        }
-        if (headless && visibleLoginOpened) {
-          await page.handlers.response(
-            response(
-              'https://api.rishiverse.rishihood.edu.in/api/v1/students/self/current/attendance/summary',
-              200,
-              { courses: [{ courseName: 'Networks', attendedLectures: 2, totalLectures: 3 }] },
-            ),
-          );
-          await page.handlers.response(
-            response(
-              'https://api.rishiverse.rishihood.edu.in/api/v1/students/self/academics/semesters',
-              200,
-              { semesters: [{ id: 'current', is_current: true }] },
-            ),
-          );
-        }
+    const blockedGoogleMock = mockChromium(
+      async (page) => {
+        await page.routes[0]({
+          request: () => ({
+            isNavigationRequest: () => true,
+            frame: () => page,
+            url: () => 'https://accounts.google.com/signin/v2/identifier',
+          }),
+          abort: async () => {},
+          continue: async () => assert.fail('headless OAuth navigation must be blocked'),
+        });
+        throw new Error('headless Google redirect blocked');
       },
       'https://rishiverse.rishihood.edu.in/lms/attendance',
-      { accountCount: 1 },
     );
-    const retrySource = createBrowserSources({
-      chromium: retryMock.chromium,
-      profileRoot: path.join(temp, 'retry'),
+    const blockedGoogleSource = createBrowserSources({
+      chromium: blockedGoogleMock.chromium,
+      profileRoot: path.join(temp, 'blocked-google'),
       responseTimeoutMs: 50,
-      rishiverseEmail: 'student@rishihood.edu.in',
     });
-    assert.deepEqual(
-      await retrySource.captureAttendance({ source: 'rishiverse' }),
-      { items: [{ name: 'Networks', attended: 2, conducted: 3, percent: 66.67 }] },
+    await assert.rejects(
+      blockedGoogleSource.captureAttendance({ source: 'rishiverse' }),
+      (error) => error.code === 'AUTH_REQUIRED',
     );
-    assert.equal(retryMock.launches[0].options.headless, true);
-    assert.equal(retryMock.launches[1].options.headless, false);
-    assert.equal(retryMock.launches[2].options.headless, true);
+    assert.equal(blockedGoogleMock.launches.length, 1);
+    assert.equal(blockedGoogleMock.launches[0].options.headless, true);
 
     const authMock = mockChromium(async (page) => {
       await page.handlers.response(
@@ -286,6 +327,21 @@ async function main() {
       authSource.captureAttendance({ source: 'newton' }),
       (error) => error.code === 'AUTH_REQUIRED',
     );
+
+    const registerMock = mockChromium(async (page) => {
+      page.setUrl('https://my.newtonschool.co/register?next=/course/viwuaeik1m82/details');
+    });
+    const registerSource = createBrowserSources({
+      chromium: registerMock.chromium,
+      profileRoot: path.join(temp, 'register'),
+      responseTimeoutMs: 5,
+    });
+    await assert.rejects(
+      registerSource.captureAttendance({ source: 'newton' }),
+      (error) => error.code === 'AUTH_REQUIRED',
+    );
+    assert.equal(registerMock.launches.length, 1);
+    assert.equal(registerMock.launches[0].options.headless, true);
 
     const redirectMock = mockChromium(async (page) => {
       await page.routes[0]({

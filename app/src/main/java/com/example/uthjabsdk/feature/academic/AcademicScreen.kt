@@ -93,7 +93,6 @@ fun AcademicScreen(
     val summary by dataSource.academicSummary.collectAsState()
     val syncStatus by dataSource.syncState.collectAsState()
     val courses by dataSource.courseAttendances.collectAsState()
-    val emails by dataSource.academicMails.collectAsState()
     val notes by dataSource.studyNotes.collectAsState()
     val todayStr = remember { LocalDate.now().toString() }
     val academicSourcesReady = listOf("newton", "rishiverse").all {
@@ -124,7 +123,7 @@ fun AcademicScreen(
             Text(
                 text = when (selectedSubTab) {
                     "attendance" -> "Track NST Core, RUFP Foundation, and 75% minimum criteria."
-                    "mail" -> "Official campus notices, faculty communications, and announcements."
+                    "mail" -> "Campus notices and important updates will arrive here later."
                     "notes" -> "Capture homework now. It will be here when you sit down to study."
                     else -> "Section D · Group 4 · Lab 1 · NST and RUFP classes together."
                 },
@@ -204,9 +203,7 @@ fun AcademicScreen(
                 summary = summary,
                 courses = courses
             )
-            "mail" -> MailTabContent(
-                emails = emails
-            )
+            "mail" -> MailTabContent()
             "notes" -> NotesTabContent(
                 notes = notes,
                 onToggleNote = { id ->
@@ -681,54 +678,19 @@ private fun CourseCard(course: CourseAttendance) {
  * Mail Subtab
  */
 @Composable
-private fun MailTabContent(
-    emails: List<AcademicMailItem>
-) {
-    val urgentCount = emails.count { it.priority == "urgent" || it.priority == "high" }
-
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        GlassPanel(backgroundColor = ForestPanel2) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    EyebrowBadge(text = "MAILBOX FEED")
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${emails.size} messages · $urgentCount priority",
-                        style = Typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
-                Text(
-                    text = "Bounded local snapshot",
-                    style = Typography.bodySmall.copy(color = ForestMuted)
-                )
-            }
-        }
-
-        GlassPanel {
-            Text(
-                text = "Recent communications",
-                style = Typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (emails.isEmpty()) {
-                Text(
-                    text = "No approved academic notices in this update.",
-                    style = Typography.bodyMedium.copy(color = ForestMuted),
-                    modifier = Modifier.padding(vertical = 16.dp)
-                )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    emails.forEach { item ->
-                        MailCard(item)
-                    }
-                }
-            }
-        }
+private fun MailTabContent() {
+    GlassPanel(backgroundColor = ForestPanel2) {
+        EyebrowBadge(text = "ACADEMIC MAIL")
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Coming soon",
+            style = Typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Your attendance, timetable, and other tools are ready to use now.",
+            style = Typography.bodyMedium.copy(color = ForestMuted)
+        )
     }
 }
 

@@ -15,20 +15,21 @@ export function extractDevpostDetails($) {
     }
   }
   if (!event) throw new Error('Event metadata unavailable on detail page');
-  const deadline = event.endDate;
-  const validDeadline =
-    typeof deadline === 'string' &&
-    /(?:Z|[+-]\d\d:\d\d)$/.test(deadline) &&
-    Number.isFinite(Date.parse(deadline));
+  const eventDate = (value) =>
+    typeof value === 'string' &&
+    /(?:Z|[+-]\d\d:\d\d)$/.test(value) &&
+    Number.isFinite(Date.parse(value))
+      ? new Date(value).toISOString()
+      : null;
   // JSON-LD description is HTML-entity encoded on Devpost.
   const decoded = $('<textarea>')
     .html(event.description || '')
     .text();
   const description = $('<div>').html(decoded).text().slice(0, 20000);
   return {
-    registration_deadline: validDeadline ? new Date(deadline).toISOString() : null,
+    start_date: eventDate(event.startDate),
+    end_date: eventDate(event.endDate),
     description,
-    submissionStart: event.startDate || null,
     detailVerifiedAt: new Date().toISOString(),
   };
 }
@@ -43,7 +44,8 @@ export async function enrichDevpost(opportunities) {
     await crawlPages([...byUrl.keys()], ({ $, request }) => {
       const item = byUrl.get(request.url);
       const details = extractDevpostDetails($);
-      item.registration_deadline = details.registration_deadline;
+      item.start_date = details.start_date;
+      item.end_date = details.end_date;
       Object.assign(item.raw_data, details);
     });
   } catch (error) {

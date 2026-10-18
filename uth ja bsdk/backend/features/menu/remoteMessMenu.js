@@ -5,12 +5,29 @@ let cachedAt = 0;
 let inFlight;
 
 function extractMenu(bundle) {
-  const marker = bundle.indexOf('g={');
-  if (marker < 0) throw new Error('RU Print menu data was not found in its app bundle');
-  const start = marker + 2;
-  const end = bundle.indexOf(',y=new Set(', start);
-  if (end < 0 || end - start > 30_000)
-    throw new Error('RU Print menu data had an unexpected format');
+  // Minifiers rename the binding and the expression after this object on each build.
+  // Anchor to the data's known shape and stop at its matching closing brace.
+  const marker = /(?:^|[=,])\s*(\{Monday:\{breakfast:\[)/.exec(bundle);
+  if (!marker) throw new Error('RU Print menu data was not found in its app bundle');
+  const start = marker.index + marker[0].indexOf(marker[1]);
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  let end = -1;
+  for (let index = start; index < bundle.length && index - start <= 30_000; index++) {
+    const char = bundle[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') quoted = true;
+    else if (char === '{') depth++;
+    else if (char === '}' && --depth === 0) {
+      end = index + 1;
+      break;
+    }
+  }
+  if (end < 0) throw new Error('RU Print menu data had an unexpected format');
   const source = bundle.slice(start, end);
   const json = source.replace(/([,{]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":');
   let menu;

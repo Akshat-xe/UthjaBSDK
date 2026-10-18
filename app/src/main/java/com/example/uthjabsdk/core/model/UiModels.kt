@@ -193,5 +193,6 @@ data class SyncStatus(
         "gmail" to SyncSourceState("gmail", "Academic mail", SyncSourceStateStatus.SUCCESS, "1 stored notice"),
         "radar" to SyncSourceState("radar", "Opportunity Radar", SyncSourceStateStatus.SUCCESS, "Unstop & Devpost verified")
     ),
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val phoneBackupMessage: String? = null
 )

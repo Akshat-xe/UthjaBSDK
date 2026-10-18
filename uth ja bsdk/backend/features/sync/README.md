@@ -16,32 +16,29 @@ const result = await captureAttendance({ source: 'newton' });
 ```
 
 `source` is `newton` or `rishiverse`. Exact user source URLs:
-- Newton: `https://my.newtonschool.co/course/viwuaeik1m82/details`
+- Newton: `https://my.newtonschool.co/course/viwuaeik1m82/details?tab=scorecard`
 - Rishiverse: `https://rishiverse.rishihood.edu.in/dashboard` (the adapter automatically navigates to `/lms/attendance` to capture authenticated site responses)
 
 Dedicated persistent Chromium profiles are stored at `backend/data/browser-sources/{newton,rishiverse}` with `0700` mode permissions. Interactive setup is provided by `node scripts/connect-attendance.cjs <newton|rishiverse>`.
+
+Newton reads subject rows from the scorecard attendance table and validates attended and total class counts. The lecture-response capture path remains a fallback. Unit tests cover the parser; an authenticated live capture still requires the one-time browser sign-in and verification on the user's Mac.
 
 ### Authentication and Google Recovery:
 - The adapter strictly connects via Google sign-in using only saved `@rishihood.edu.in` or `@nst.rishihood.edu.in` accounts.
 - If interactive authentication is required (password prompt, MFA, CAPTCHA, or ambiguous accounts), the adapter halts and signals `AUTH_REQUIRED`, surfacing as `setup_required` in the UI. It never automates password submission or credential guessing.
 - Setup and auth failures surface as `setup_required` (prompting local connection on the laptop), while site parsing errors, unreadable responses, or network timeouts surface as `failed`. Empty attendance data is rejected with an error; empty success is never recorded.
 
-`connectors.js` coordinates Newton attendance, RUFP attendance, local Apple Mail, and Opportunity Radar. The single `/api/sync` endpoint starts it after an explicit top-bar action; `/api/sync/status` exposes only the local progress snapshot needed by the UI.
+`connectors.js` coordinates Newton attendance, RUFP attendance, and Opportunity Radar. The current server pipeline marks Academic Mail Coming soon. `/api/sync` starts the shared pipeline after an explicit top-bar action; the configured schedule and authenticated phone-request worker can also start it. `/api/sync/status` exposes only the local progress snapshot needed by the UI.
 
 Each source reports its own success, setup requirement, partial result, or failure so one broken integration does not erase other results. Keep credentials local and diagnostics bounded. Run `tests/unit/sync-integration.cjs` and `tests/browser/update-control.cjs` after changes.
 
-Newton requires `NEWTON_COURSE_HASH` plus `NEWTON_AUTH_TOKEN`; RUFP requires an HTTPS `RISHIVERSE_ATTENDANCE_URL` plus `RISHIVERSE_AUTH_TOKEN`. Tokens may instead be stored in macOS Keychain services `uth-ja-newton` and `uth-ja-rishiverse`. The app cannot log in without these account-specific values. Never put them in source files or browser code. HTTP 401/403 is reported as expired login, and an unknown API response is reported as a failure rather than an empty successful update.
+The default attendance tasks use isolated signed-in browser profiles. The one-time interactive sign-ins have not yet yielded verified live NST and RUFP captures. Never put account credentials in source files or browser code. HTTP 401/403 is reported as expired login, and an unknown response is reported as a failure rather than an empty successful update.
 
-Successful NST/RUFP attendance is retained in the private sync snapshot and projected into `/api/academic`, including summary percentages and course cards. A failed later refresh keeps the last successful attendance. The timetable still comes from the saved NST schedule and the Section D RUFP routine, since the attendance APIs do not supply class times. Copilot CLI runs locally only for bounded Apple Mail snippets and public Radar event summaries; account tokens and raw attendance do not enter Copilot prompts. A CLI failure leaves fetched mail available as a partial result. The current CLI invocation was checked against `copilot --help` and a harmless JSON prompt.
+Successful NST/RUFP attendance is retained in the private sync snapshot and projected into `/api/academic`, including summary percentages and course cards. A failed later refresh keeps the last successful attendance. The timetable still comes from the saved NST schedule and the Section D RUFP routine, since the attendance sources do not supply class times. Account tokens and raw attendance do not enter Copilot prompts.
 
-## Rishihood Mail to urgent phone pipeline
+## Academic Mail status
 
-- **Account-scoped inbox selection:** Apple Mail automation explicitly scans account email addresses and usernames for an exact `@rishihood.edu.in` (or `@nst.rishihood.edu.in`) suffix. It never accesses unified `inbox` across accounts or personal mailboxes.
-- **Honest status reporting:** If no Rishihood account exists in Apple Mail, sync reports `setup_required` (`Rishihood Mail setup needed: configure an @rishihood.edu.in account in Apple Mail.`). If macOS Automation access is blocked, it reports `failed`.
-- **Conservative AI structured classification:** Bounded email snippets (up to 8 messages, max 180 chars per snippet) are classified locally via Copilot CLI. The AI assigns structured priority (`urgent`, `high`, `normal`, `low`), `category`, `summary` (max 220 chars), and `actionItem` (max 180 chars).
-- **Strict nonurgent rejection:** Only messages with verified `urgent` or `high` priority pass to the urgent phone pipeline. Normal, low, unverified, or failed AI classifications are rejected and never published to Android.
-- **Privacy & payload safeguards:** Raw message bodies, auth headers, and private email addresses are never logged or persisted in cloud snapshots.
-- **Mobile publisher & academic snapshot:** Approved urgent rows are stored in `academicSources.gmail` with a source freshness timestamp. `/api/academic` serves these live rows, and the mobile publisher forwards them to Convex/Android. `MOBILE_ACADEMIC_MAIL_SENDERS` defaults to `@rishihood.edu.in` and `@nst.rishihood.edu.in` when unset; legacy `emails.json` is never published as current.
+Academic Mail is intentionally Coming soon in the current server and Android UI. The sync pipeline does not invoke the Apple Mail connector, and live mail-to-phone delivery is unverified. Earlier account-scoped Apple Mail, bounded AI classification, and sender allowlist safeguards remain in the code for a future release; they do not make the feature active today.
 
 ## Scheduled sync orchestration
 
@@ -58,6 +55,8 @@ Scheduled sync is **disabled by default** and enabled strictly via local environ
 | `SYNC_SCHEDULE_CRON` | Standard 5-field cron expression (`min hour dom month dow`) | Unset | `SYNC_SCHEDULE_CRON="*/30 * * * *"` |
 
 If `SYNC_SCHEDULE_CRON` is set and valid, it takes precedence. Otherwise, `SYNC_SCHEDULE_INTERVAL` governs the schedule.
+
+The installed `com.uthjabsdk.server` LaunchAgent keeps the local server available while the Mac is logged in and awake. With the local schedule set to `30m`, it provides a cron-like quick repeat of the same Update all pipeline. Its separate phone-request worker polls the queue about every 7 seconds. The agent and health endpoint were verified live on 6 October; relaunch after the next login and behavior across sleep still need observation.
 
 ### Non-overlap and Execution Guarantees
 

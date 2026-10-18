@@ -1,4 +1,8 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { createRequire } = require('node:module');
 
 (async () => {
   const { analyzeOpportunity, rankAndLimit } =
@@ -39,8 +43,9 @@ const assert = require('node:assert/strict');
 
   const easy = analyzeOpportunity(event('easy'));
   assert.equal(easy.bucket, 'easy');
-  assert.equal(easy.tier, 'Tier S');
+  assert.equal(easy.tier, 'Tier A');
   assert(easy.score >= 90);
+  assert(!easy.reason.includes('verified'), 'listing fields do not claim verification');
   assert.equal(easy.effortHours, '4–10');
   const hard = analyzeOpportunity(
     event('hard', {
@@ -63,13 +68,20 @@ const assert = require('node:assert/strict');
     }),
   );
   assert.equal(missing.bucket, 'unverified');
-  assert.equal(missing.tier.startsWith('Tier '), true);
+  assert.notEqual(missing.tier, 'Tier S');
+
+  const { tierEngine } = await import('../../backend/opportunity-radar/src/scoring/tierEngine.js');
+  assert.notEqual(
+    tierEngine.calculateTier(event('legacy'), { attendance_safe: true, isWeekend: true }).tier,
+    'Tier S',
+    'legacy scoring cannot grant S from an organizer keyword',
+  );
 
   const many = Array.from({ length: 12 }, (_, i) => event(`listed-${i}`));
   many.push(event('listed-0', { id: 'other-source-duplicate' }));
   const ranked = rankAndLimit(many);
   assert.equal(
-    ranked.filter((x) => x.analysis.bucket === 'easy' && x.analysis.tierKey === 'S').length,
+    ranked.filter((x) => x.analysis.bucket === 'easy' && x.analysis.tierKey === 'A').length,
     10,
     'limit each difficulty/tier bucket to ten',
   );
@@ -94,8 +106,50 @@ const assert = require('node:assert/strict');
     1,
     'never force-fill tiers',
   );
+  assert(ranked.every((x) => x.analysis.tierKey !== 'S'), 'quota does not promise S-tier');
+
+  const radarRequire = createRequire(path.resolve(__dirname, '../../backend/opportunity-radar/package.json'));
+  const { load } = radarRequire('cheerio');
+  const { extractDevpostDetails } =
+    await import('../../backend/opportunity-radar/src/scrapers/devpostDetails.js');
+  const $ = load(`<script type="application/ld+json">${JSON.stringify({
+    '@type': 'Event',
+    startDate: '2026-11-01T09:00:00+05:30',
+    endDate: '2026-11-02T18:00:00+05:30',
+    description: 'Build a web app',
+  })}</script>`);
+  const details = extractDevpostDetails($);
+  assert.equal(details.start_date, '2026-11-01T03:30:00.000Z');
+  assert.equal(details.end_date, '2026-11-02T12:30:00.000Z');
+  assert.equal(details.registration_deadline, undefined, 'event end is not a registration deadline');
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'radar-expiry-test-'));
+  process.env.RADAR_DATA_DIR = tempDir;
+  try {
+    const { database } = await import('../../backend/opportunity-radar/src/db/database.js');
+    try {
+      database.upsertOpportunity(event('ended', {
+        registration_deadline: null,
+        end_date: '2000-01-01T00:00:00.000Z',
+      }));
+      database.upsertOpportunity(event('still-open', {
+        registration_deadline: null,
+        end_date: null,
+      }));
+      assert.deepEqual(
+        database.getAllOpportunities({ status: 'active' }).map((item) => item.id),
+        ['still-open'],
+        'known ended events expire while undated listings remain active',
+      );
+    } finally {
+      database.db.close();
+    }
+  } finally {
+    delete process.env.RADAR_DATA_DIR;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
   console.log(
-    'PASS: event difficulty, quality thresholds, conservative unverified bucket, dedupe, rank order, and ten-item tier cap.',
+    'PASS: evidence-based tiers, Devpost event dates, known-end expiry, dedupe, and ten-item tier cap.',
   );
 })().catch((error) => {
   console.error(error);

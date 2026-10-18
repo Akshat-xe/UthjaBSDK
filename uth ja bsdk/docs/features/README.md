@@ -9,7 +9,7 @@ This map describes where to make changes and how the app is built. Keep private 
 | `src/ui/features/routine/`        | Date-aware class and routine schedule generation                          | `app.ts` imports schedule helpers to render routine and timetable views             |
 | `src/ui/features/academic/`       | Imported timetable date labels and a future academic page migration       | Saved source dates receive current Past/Today/Upcoming badges                       |
 | `src/ui/features/sync/`           | Shared Update all button, progress dialog, polling, and completion events | Button → `POST /api/sync` → poll `/api/sync/status` → refresh the visible dashboard |
-| `backend/features/sync/`          | Newton, RUFP, Mail, and Radar sync coordination                           | Express route → bounded connector calls → persisted source results                  |
+| `backend/features/sync/`          | Newton, RUFP, and Radar sync coordination; Mail is Coming soon            | Express route, Mac schedule, or phone request → bounded connector calls → persisted source results |
 | `backend/features/local-records/` | Local seed data, snapshots, and record storage                            | Backend routes load/update private local records                                    |
 | `backend/features/backup/`        | Per-device backup and scheduled daily reports                             | Browser backup request → validated private workspace files                          |
 | `backend/features/menu/`          | RU Print source request, cache, parser, and menu shaping                  | Food view → `/api/mess-menu` → validated RU Print data                              |
