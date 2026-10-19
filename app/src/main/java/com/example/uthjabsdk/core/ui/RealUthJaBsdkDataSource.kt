@@ -383,18 +383,7 @@ class RealUthJaBsdkDataSource(
         )
 
         // Course Attendances
-        _courseAttendances.value = snapshot.academic.subjects.map { subj ->
-            CourseAttendance(
-                name = subj.name,
-                code = subj.code,
-                group = subj.group,
-                attended = subj.attended,
-                total = subj.total,
-                percent = subj.percent,
-                canMiss = subj.canMiss,
-                needAttend = subj.needAttend
-            )
-        }
+        _courseAttendances.value = mergeAttendanceCourses(snapshot.academic.subjects)
 
         // Weekly Classes
         _weeklyClasses.value = snapshot.academic.schedule.flatMap { day ->

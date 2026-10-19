@@ -23,6 +23,8 @@ Android automatic backup and device transfer are disabled for app data. After pa
 
 NST and RUFP attendance use isolated local browser profiles. Run `node scripts/connect-attendance.cjs newton` and `node scripts/connect-attendance.cjs rishiverse` from `uth ja bsdk`, then sign in interactively in the opened browser windows once. Passwords, MFA, and CAPTCHA are never automated. The NST adapter reads subject attendance from the course scorecard, with a lecture-response fallback. On 19 October, signed-in captures from both sources were published and imported on the Motorola (3 NST and 6 RUFP courses). Each active source's status is shown independently so a successful Radar or menu update is not mistaken for fresh attendance. If a campus session expires, repeat the interactive setup. Academic Mail stays Coming soon regardless of Apple Mail account setup.
 
+On Android, the attendance screen combines the Mathematics, Problem Solving, and Systems & AI lecture/Lab 1 pairs by summing attended and conducted classes. It shows each source's counts, retains unpaired courses, and keeps the NST, RUFP, and overall totals unchanged.
+
 ## Checks
 
 - Website: `cd "uth ja bsdk" && npm test && npx playwright install chromium && npm run test:browser` (or set `CHROME_EXECUTABLE` to an installed Chrome binary)

@@ -640,9 +640,20 @@ private fun CourseCard(course: CourseAttendance) {
             style = Typography.titleMedium.copy(fontWeight = FontWeight.Bold)
         )
         Text(
-            text = "${course.code} · ${course.attended} attended · ${course.total} total",
+            text = listOfNotNull(
+                course.code.takeIf { it.isNotBlank() },
+                "${course.attended} attended",
+                "${course.total} total"
+            ).joinToString(" · "),
             style = Typography.bodySmall.copy(color = ForestMuted)
         )
+        course.breakdown?.let { breakdown ->
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                text = breakdown,
+                style = Typography.bodySmall.copy(color = ForestAccent, fontSize = 11.sp)
+            )
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -668,7 +679,8 @@ private fun CourseCard(course: CourseAttendance) {
             text = adviceText,
             style = Typography.bodySmall.copy(
                 fontSize = 11.sp,
-                color = if (course.canMiss != null) ForestGreen else ForestPeach
+                color = if (course.needAttend != null && course.needAttend > 0) StatusDanger
+                    else if (course.percent >= 75f) ForestGreen else ForestPeach
             )
         )
     }

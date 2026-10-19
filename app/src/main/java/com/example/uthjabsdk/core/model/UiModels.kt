@@ -64,7 +64,8 @@ data class CourseAttendance(
     val total: Int,
     val percent: Float,
     val canMiss: Int? = null,
-    val needAttend: Int? = null
+    val needAttend: Int? = null,
+    val breakdown: String? = null
 )
 
 data class AttendanceGroupSummary(
