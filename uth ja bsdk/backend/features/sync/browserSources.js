@@ -181,10 +181,10 @@ function countValue(value) {
 }
 
 function normalizeRishiverseAttendance(payload) {
-  const records = recordList(payload, ['courses', 'results', 'attendance', 'items']);
+  const records = recordList(payload, ['byCourse', 'courses', 'results', 'attendance', 'items']);
   if (!records?.length) {
     const nested = payload?.data;
-    const nestedRecords = recordList(nested, ['courses', 'results', 'attendance', 'items']);
+    const nestedRecords = recordList(nested, ['byCourse', 'courses', 'results', 'attendance', 'items']);
     if (!nestedRecords?.length) {
       throw new UnsupportedPayloadError('Rishiverse returned no attendance courses.');
     }
@@ -233,9 +233,16 @@ function currentSemesterKey(payload) {
           semester.isCurrent === true ||
           semester.current === true),
     );
-    if (current.length !== 1) return null;
+    const selected = current.length === 1
+      ? current[0]
+      : nestedSemesters.length === 1 &&
+          nestedSemesters[0] && typeof nestedSemesters[0] === 'object' &&
+          !['is_current', 'isCurrent', 'current'].some((key) => key in nestedSemesters[0])
+        ? nestedSemesters[0]
+        : null;
+    if (!selected) return null;
     const value =
-      current[0].slug ?? current[0].id ?? current[0].semester ?? current[0].code;
+      selected.slug ?? selected.id ?? selected.semester ?? selected.number ?? selected.code;
     return value === undefined || value === null ? null : String(value);
   }
   const explicit = payload?.current_semester ?? payload?.currentSemester;

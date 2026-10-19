@@ -32,7 +32,7 @@ Newton reads subject rows from the scorecard attendance table and validates atte
 
 Each source reports its own success, setup requirement, partial result, or failure so one broken integration does not erase other results. Keep credentials local and diagnostics bounded. Run `tests/unit/sync-integration.cjs` and `tests/browser/update-control.cjs` after changes.
 
-The default attendance tasks use isolated signed-in browser profiles. The one-time interactive sign-ins have not yet yielded verified live NST and RUFP captures. Never put account credentials in source files or browser code. HTTP 401/403 is reported as expired login, and an unknown response is reported as a failure rather than an empty successful update.
+The default attendance tasks use isolated signed-in browser profiles. The one-time interactive sign-ins yielded verified live captures on 19 October: 3 NST and 6 RUFP courses, published and imported on the Motorola. Never put account credentials in source files or browser code. HTTP 401/403 is reported as expired login, and an unknown response is reported as a failure rather than an empty successful update.
 
 Successful NST/RUFP attendance is retained in the private sync snapshot and projected into `/api/academic`, including summary percentages and course cards. A failed later refresh keeps the last successful attendance. The timetable still comes from the saved NST schedule and the Section D RUFP routine, since the attendance sources do not supply class times. Account tokens and raw attendance do not enter Copilot prompts.
 

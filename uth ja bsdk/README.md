@@ -39,7 +39,7 @@ node scripts/connect-attendance.cjs rishiverse
 
 Profiles are kept in `backend/data/browser-sources/` with `0700` permissions. Google sign-in selects the single saved `@rishihood.edu.in` or `@nst.rishihood.edu.in` account and prompts for manual interaction if password/MFA is required.
 
-The NST adapter opens the course scorecard and parses its subject attendance table, with a lecture-response fallback. Parser tests have passed; authenticated live NST and RUFP captures still require the one-time browser sign-ins and source verification.
+The NST adapter opens the course scorecard and parses its subject attendance table, with a lecture-response fallback. The user completed one-time browser sign-ins on 19 October; live captures returned 3 NST and 6 RUFP courses, and the phone imported both. A later expired session may require interactive sign-in again.
 
 ## Auto-start at login (LaunchAgent)
 

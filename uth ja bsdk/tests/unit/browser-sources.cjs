@@ -169,6 +169,13 @@ async function main() {
     }),
     [{ name: 'Networks', attended: 3, conducted: 4, percent: 75 }],
   );
+  assert.deepEqual(
+    normalizeRishiverseAttendance({
+      overall: { totalLectures: 4, attendedLectures: 3 },
+      byCourse: [{ courseName: 'Networks', attendedLectures: 3, totalLectures: 4 }],
+    }),
+    [{ name: 'Networks', attended: 3, conducted: 4, percent: 75 }],
+  );
   assert.throws(
     () =>
       normalizeRishiverseAttendance({
@@ -186,6 +193,8 @@ async function main() {
     'current',
   );
   assert.equal(currentSemesterKey({ semesters: [{ id: 'ambiguous', current: false }] }), null);
+  assert.equal(currentSemesterKey({ semesters: [{ number: 1, termName: 'Fall' }] }), '1');
+  assert.equal(currentSemesterKey({ semesters: [{ number: 1 }, { number: 2 }] }), null);
 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-source-test-'));
   try {
@@ -259,6 +268,31 @@ async function main() {
     });
     assert.deepEqual(
       await rishiverse.captureAttendance({ source: 'rishiverse' }),
+      { items: [{ name: 'Networks', attended: 2, conducted: 3, percent: 66.67 }] },
+    );
+    const liveShapeMock = mockChromium(
+      async (page) => {
+        await page.handlers.response(response(
+          'https://api.rishiverse.rishihood.edu.in/api/v1/students/self/academics/semesters',
+          200,
+          { semesters: [{ number: 1, termName: 'Fall' }] },
+        ));
+        await page.handlers.response(response(
+          'https://api.rishiverse.rishihood.edu.in/api/v1/students/self/1/attendance/summary',
+          200,
+          { overall: { totalLectures: 3 }, byCourse: [
+            { courseName: 'Networks', attendedLectures: 2, totalLectures: 3 },
+          ] },
+        ));
+      },
+      'https://rishiverse.rishihood.edu.in/lms/attendance',
+    );
+    assert.deepEqual(
+      await createBrowserSources({
+        chromium: liveShapeMock.chromium,
+        profileRoot: path.join(temp, 'rishiverse-live-shape'),
+        responseTimeoutMs: 50,
+      }).captureAttendance({ source: 'rishiverse' }),
       { items: [{ name: 'Networks', attended: 2, conducted: 3, percent: 66.67 }] },
     );
     const wrongApiHost = mockChromium(
